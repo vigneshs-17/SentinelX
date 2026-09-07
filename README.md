@@ -2,9 +2,9 @@
 
 ## Network Intrusion Detection & Threat Monitoring System
 
-SentinelX is a hybrid network intrusion detection and threat monitoring system developed using Python. It monitors network traffic in real time, extracts packet-level features, detects suspicious behavior using rule-based detection, and uses a machine-learning model as a secondary confirmation layer.
+SentinelX is a hybrid network intrusion detection and threat monitoring system built with Python. It monitors network traffic in real time, analyzes packet-level features, detects suspicious behavior using rule-based detection, and uses machine learning as a secondary confirmation layer.
 
-The project is designed as a cybersecurity portfolio project to demonstrate practical knowledge of network security, packet analysis, intrusion detection, machine learning, logging, databases, APIs, and security monitoring.
+The project demonstrates practical cybersecurity concepts including network traffic analysis, intrusion detection, packet capture, machine learning, alert logging, database storage, REST APIs, and security monitoring.
 
 ---
 
@@ -15,7 +15,7 @@ The project is designed as a cybersecurity portfolio project to demonstrate prac
 - TCP SYN port-scan detection
 - High-traffic anomaly detection
 - Machine-learning based threat classification
-- Hybrid rule-based + ML detection architecture
+- Hybrid rule-based and ML detection
 - JSON alert logging
 - SQLite alert storage
 - Flask REST API
