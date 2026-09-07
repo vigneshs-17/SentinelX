@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>SentinelX - Security Dashboard</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 30px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: auto;
+        }
+
+        header {
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        header p {
+            color: #94a3b8;
+        }
+
+        .status {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 8px 14px;
+            border-radius: 20px;
+            background: #14532d;
+            color: #86efac;
+            font-size: 14px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 22px;
+            border-radius: 12px;
+            border: 1px solid #334155;
+        }
+
+        .card h3 {
+            color: #94a3b8;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .card .number {
+            font-size: 32px;
+            font-weight: bold;
+        }
+
+        .alerts {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 22px;
+        }
+
+        .alerts h2 {
+            margin-bottom: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 14px 10px;
+            text-align: left;
+            border-bottom: 1px solid #334155;
+        }
+
+        th {
+            color: #94a3b8;
+            font-size: 13px;
+        }
+
+        td {
+            font-size: 14px;
+        }
+
+        .high {
+            color: #f87171;
+            font-weight: bold;
+        }
+
+        .empty {
+            text-align: center;
+            color: #94a3b8;
+            padding: 30px;
+        }
+
+        @media (max-width: 800px) {
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            table {
+                font-size: 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <header>
+        <h1>🛡️ SentinelX</h1>
+        <p>Network Intrusion Detection & Threat Monitoring System</p>
+
+        <div class="status">
+            ● SYSTEM ONLINE
+        </div>
+    </header>
+
+    <section class="stats">
+
+        <div class="card">
+            <h3>Total Alerts</h3>
+            <div class="number" id="total-alerts">0</div>
+        </div>
+
+        <div class="card">
+            <h3>High Severity</h3>
+            <div class="number" id="high-severity">0</div>
+        </div>
+
+        <div class="card">
+            <h3>Port Scans</h3>
+            <div class="number" id="port-scans">0</div>
+        </div>
+
+        <div class="card">
+            <h3>High Traffic</h3>
+            <div class="number" id="high-traffic">0</div>
+        </div>
+
+    </section>
+
+    <section class="alerts">
+
+        <h2>Recent Security Alerts</h2>
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Timestamp</th>
+                    <th>Threat</th>
+                    <th>Severity</th>
+                    <th>Source IP</th>
+                    <th>Protocol</th>
+                    <th>Message</th>
+                </tr>
+            </thead>
+
+            <tbody id="alerts-table">
+                <tr>
+                    <td colspan="7" class="empty">
+                        Loading alerts...
+                    </td>
+                </tr>
+            </tbody>
+
+        </table>
+
+    </section>
+
+</div>
+
+<script>
+
+async function loadStats() {
+
+    try {
+
+        const response = await fetch("/api/stats");
+        const stats = await response.json();
+
+        document.getElementById("total-alerts").textContent =
+            stats.total_alerts;
+
+        document.getElementById("high-severity").textContent =
+            stats.high_severity;
+
+        document.getElementById("port-scans").textContent =
+            stats.port_scans;
+
+        document.getElementById("high-traffic").textContent =
+            stats.high_traffic;
+
+    } catch (error) {
+
+        console.error("Failed to load statistics:", error);
+
+    }
+}
+
+
+async function loadAlerts() {
+
+    try {
+
+        const response = await fetch("/api/alerts");
+        const alerts = await response.json();
+
+        const table = document.getElementById("alerts-table");
+
+        table.innerHTML = "";
+
+        if (alerts.length === 0) {
+
+            table.innerHTML = `
+                <tr>
+                    <td colspan="7" class="empty">
+                        No security alerts detected.
+                    </td>
+                </tr>
+            `;
+
+            return;
+        }
+
+        alerts.forEach(alert => {
+
+            const row = document.createElement("tr");
+
+            row.innerHTML = `
+                <td>${alert.id}</td>
+                <td>${alert.timestamp}</td>
+                <td>${alert.threat_type}</td>
+                <td class="high">${alert.severity}</td>
+                <td>${alert.source_ip || "N/A"}</td>
+                <td>${alert.protocol || "N/A"}</td>
+                <td>${alert.message}</td>
+            `;
+
+            table.appendChild(row);
+
+        });
+
+    } catch (error) {
+
+        console.error("Failed to load alerts:", error);
+
+    }
+}
+
+
+loadStats();
+loadAlerts();
+
+setInterval(() => {
+    loadStats();
+    loadAlerts();
+}, 5000);
+
+</script>
+
+</body>
+</html>
