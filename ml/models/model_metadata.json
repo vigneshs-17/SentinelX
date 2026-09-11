@@ -1,0 +1,49 @@
+{
+  "model_version": "2.0.0",
+  "model_type": "RandomForestClassifier",
+  "created_at": "2026-09-11T07:25:45.503363+00:00",
+  "random_state": 42,
+  "features": [
+    "packet_size",
+    "source_port",
+    "destination_port",
+    "protocol",
+    "tcp_syn"
+  ],
+  "classes": [
+    "HIGH_TRAFFIC",
+    "NORMAL",
+    "PORT_SCAN"
+  ],
+  "hyperparameters": {
+    "class_weight": "balanced",
+    "max_depth": 10,
+    "min_samples_leaf": 1,
+    "min_samples_split": 5,
+    "n_estimators": 100
+  },
+  "cross_validation": {
+    "folds": 5,
+    "metric": "f1_macro",
+    "score": 0.8189
+  },
+  "performance": {
+    "training_accuracy": 0.8506,
+    "test_accuracy": 0.7675,
+    "macro_f1": 0.7894,
+    "weighted_f1": 0.7739,
+    "roc_auc_ovr": 0.9077
+  },
+  "provenance": {
+    "dataset": "network_traffic.csv",
+    "total_samples": 2000,
+    "train_samples": 1600,
+    "test_samples": 400
+  },
+  "limitations": [
+    "Dataset is synthetic, generated from fixed distribution ranges.",
+    "HIGH_TRAFFIC and NORMAL feature distributions heavily overlap on single packets.",
+    "Single-packet features cannot measure temporal rate (pps, bps).",
+    "PORT_SCAN detection relies heavily on tcp_syn==1 artifact."
+  ]
+}

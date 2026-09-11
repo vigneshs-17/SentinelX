@@ -1,0 +1,89 @@
+{
+  "n_samples": 400,
+  "classes": [
+    "HIGH_TRAFFIC",
+    "NORMAL",
+    "PORT_SCAN"
+  ],
+  "accuracy": 0.7675,
+  "macro_precision": 0.8005,
+  "macro_recall": 0.8167,
+  "macro_f1": 0.7894,
+  "weighted_precision": 0.8202,
+  "weighted_recall": 0.7675,
+  "weighted_f1": 0.7739,
+  "macro_false_positive_rate": 0.1128,
+  "macro_false_negative_rate": 0.1833,
+  "roc_auc_ovr": 0.9077,
+  "roc_auc_ovo": 0.9209,
+  "per_class_roc_auc": {
+    "HIGH_TRAFFIC": 0.8418,
+    "NORMAL": 0.8814,
+    "PORT_SCAN": 1.0
+  },
+  "confusion_matrix": [
+    [
+      83,
+      17,
+      0
+    ],
+    [
+      76,
+      124,
+      0
+    ],
+    [
+      0,
+      0,
+      100
+    ]
+  ],
+  "per_class": {
+    "HIGH_TRAFFIC": {
+      "support": 100,
+      "true_positives": 83,
+      "false_positives": 76,
+      "false_negatives": 17,
+      "true_negatives": 224,
+      "precision": 0.522,
+      "recall": 0.83,
+      "f1_score": 0.6409,
+      "false_positive_rate": 0.2533,
+      "false_negative_rate": 0.17
+    },
+    "NORMAL": {
+      "support": 200,
+      "true_positives": 124,
+      "false_positives": 17,
+      "false_negatives": 76,
+      "true_negatives": 183,
+      "precision": 0.8794,
+      "recall": 0.62,
+      "f1_score": 0.7273,
+      "false_positive_rate": 0.085,
+      "false_negative_rate": 0.38
+    },
+    "PORT_SCAN": {
+      "support": 100,
+      "true_positives": 100,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "true_negatives": 300,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "false_positive_rate": 0.0,
+      "false_negative_rate": 0.0
+    }
+  },
+  "model_label": "Improved Model (v2)",
+  "training_accuracy": 0.8506,
+  "best_cv_macro_f1": 0.8189,
+  "best_hyperparameters": {
+    "class_weight": "balanced",
+    "max_depth": 10,
+    "min_samples_leaf": 1,
+    "min_samples_split": 5,
+    "n_estimators": 100
+  }
+}

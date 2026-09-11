@@ -1,0 +1,41 @@
+================================================================================
+SENTINELX MACHINE LEARNING EVALUATION: CONFUSION MATRICES
+Test Set Size: N = 400 (Stratified holdout, random_state=42)
+Classes: ['HIGH_TRAFFIC', 'NORMAL', 'PORT_SCAN']
+================================================================================
+
+1. BASELINE MODEL (v1) CONFUSION MATRIX
+File: ml/models/sentinelx_model_v1_baseline.pkl
+Parameters: RandomForestClassifier(n_estimators=100, random_state=42, class_weight=None, max_depth=None)
+
+Actual \ Predicted    HIGH_TRAFFIC          NORMAL       PORT_SCAN
+------------------------------------------------------------------
+HIGH_TRAFFIC                  53              47               0
+NORMAL                        45             155               0
+PORT_SCAN                      0               0             100
+
+Interpretation:
+- HIGH_TRAFFIC: 53 True Positives, 47 False Negatives (misclassified as NORMAL), 0 misclassified as PORT_SCAN.
+- NORMAL: 155 True Positives, 45 False Positives (misclassified as HIGH_TRAFFIC), 0 misclassified as PORT_SCAN.
+- PORT_SCAN: 100 True Positives, 0 False Negatives, 0 False Positives.
+Key Issue: 47% False Negative Rate on HIGH_TRAFFIC. Missed almost half of all volumetric threats.
+
+
+2. IMPROVED MODEL (v2) CONFUSION MATRIX
+File: ml/models/sentinelx_model_v2.pkl
+Parameters: RandomForestClassifier(n_estimators=100, max_depth=10, min_samples_split=5, min_samples_leaf=1, class_weight='balanced', random_state=42)
+
+Actual \ Predicted    HIGH_TRAFFIC          NORMAL       PORT_SCAN
+------------------------------------------------------------------
+HIGH_TRAFFIC                  83              17               0
+NORMAL                        76             124               0
+PORT_SCAN                      0               0             100
+
+Interpretation:
+- HIGH_TRAFFIC: 83 True Positives (surge of +30), 17 False Negatives (down from 47).
+- NORMAL: 124 True Positives, 76 misclassified as HIGH_TRAFFIC (reflecting balanced trade-off on overlapping feature space).
+- PORT_SCAN: 100 True Positives, 0 False Negatives, 0 False Positives.
+Key Improvement: False Negative Rate on HIGH_TRAFFIC reduced from 47% down to 17%.
+Overall Macro F1 increased from 0.7688 to 0.7894.
+Overfitting reduced from 100% training accuracy to 85.06%.
+================================================================================

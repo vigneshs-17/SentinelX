@@ -9,7 +9,7 @@ from config.settings import CAPTURE_INTERFACE, ML_ALERT_COOLDOWN
 from detection.rule_engine import detect_port_scan
 from detection.traffic_rules import detect_high_traffic
 from logs.alert_logger import log_alert
-from ml.predictor import predict_threat
+from ml.predictor import predict_threat, predict_threat_with_confidence
 
 
 last_ml_alert = defaultdict(float)
@@ -68,9 +68,10 @@ def process_packet(packet):
     threat_type = rule_alert["threat_type"]
     source_ip = rule_alert.get("source_ip", packet_data["source_ip"])
     ml_prediction = None
+    ml_confidence = None
 
     try:
-        ml_prediction = predict_threat(packet_data)
+        ml_prediction, ml_confidence = predict_threat_with_confidence(packet_data)
     except Exception as error:
         safe_print(f"[ML ERROR] {error}")
 
@@ -86,6 +87,7 @@ def process_packet(packet):
             "destination_ip": packet_data["destination_ip"],
             "protocol": packet_data["protocol"],
             "ml_confirmed": True,
+            "ml_confidence": ml_confidence,
             "message": (
                 f"Rule engine and machine learning "
                 f"model both detected possible "
@@ -110,6 +112,7 @@ def process_packet(packet):
     rule_alert["destination_ip"] = packet_data["destination_ip"]
     rule_alert["protocol"] = packet_data["protocol"]
     rule_alert["ml_confirmed"] = False
+    rule_alert["ml_confidence"] = ml_confidence
 
     pipeline.metrics.record_alert()
 

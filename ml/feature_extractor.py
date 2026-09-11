@@ -11,17 +11,18 @@ def extract_features(packet_data):
         "OTHER": 0
     }
 
+    raw_packet_size = packet_data.get("packet_size")
+    raw_tcp_syn = packet_data.get("tcp_syn")
+
     features = {
-        "packet_size": packet_data.get("packet_size", 0),
-        "source_port": packet_data.get("source_port") or 0,
-        "destination_port": packet_data.get("destination_port") or 0,
+        "packet_size": int(raw_packet_size) if raw_packet_size is not None else 0,
+        "source_port": int(packet_data.get("source_port") or 0),
+        "destination_port": int(packet_data.get("destination_port") or 0),
         "protocol": protocol_map.get(
             packet_data.get("protocol"),
             0
         ),
-        "tcp_syn": int(
-            packet_data.get("tcp_syn", False)
-        )
+        "tcp_syn": int(bool(raw_tcp_syn)) if raw_tcp_syn is not None else 0
     }
 
     return features
