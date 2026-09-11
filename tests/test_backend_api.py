@@ -32,6 +32,35 @@ class TestBackendApi:
         assert "SentinelX" in html_content
         assert "Network Intrusion Detection & Threat Monitoring System" in html_content
 
+    def test_dashboard_p0_features_and_xss_safety(self, client):
+        """Verify dashboard/index.html implements P0 features, destination_ip, health probe, and XSS safety."""
+        response = client.get("/")
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+
+        # Destination IP vector rendering
+        assert "destination_ip" in content
+        assert "vector-arrow" in content
+        assert "ip-source" in content
+        assert "ip-dest" in content
+
+        # Live /health probe
+        assert "/health" in content
+        assert "checkHealth" in content
+        assert "ENGINE ONLINE" in content
+
+        # Keyed DOM reconciliation
+        assert "data-alert-id" in content
+        assert "insertBefore" in content
+
+        # Human-friendly timestamp
+        assert "formatTimestamp" in content
+
+        # XSS safety: no innerHTML or insertAdjacentHTML anywhere in the file
+        assert "innerHTML" not in content, "Found unsafe innerHTML in dashboard/index.html!"
+        assert "insertAdjacentHTML" not in content
+        assert "document.write" not in content
+
     def test_security_headers_present_on_all_responses(self, client):
         """Verify defensive HTTP security headers are injected into all HTTP responses."""
         endpoints = ["/", "/health", "/api/alerts", "/api/stats"]
