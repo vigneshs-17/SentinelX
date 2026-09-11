@@ -151,30 +151,35 @@ class TestBackendApi:
         root_resp = client.get("/")
         assert "no-store" not in root_resp.headers.get("Cache-Control", "")
 
-    def test_cors_origin_scoping(self, client):
-        """Verify CORS headers are returned for allowed local origins, local file:// (Origin: null), and omitted for untrusted origins."""
+    def test_cors_origin_scoping(self, client, monkeypatch):
+        """Verify CORS headers are returned for allowed local origins, rejected for Origin: null by default, allowed when opt-in enabled, and omitted for untrusted origins."""
         # Allowed local origin
         resp_allowed = client.get("/api/stats", headers={"Origin": "http://127.0.0.1:5000"})
         assert resp_allowed.headers.get("Access-Control-Allow-Origin") == "http://127.0.0.1:5000"
         assert resp_allowed.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
 
-        # Local file:// page origin (browsers send Origin: null)
+        # By default, Origin: null (local file:// / sandboxed iframe) is REJECTED
         for ep in ["/api/stats", "/api/alerts"]:
             resp_null = client.get(ep, headers={"Origin": "null"})
             assert resp_null.status_code == 200
-            assert resp_null.headers.get("Access-Control-Allow-Origin") == "null"
-            assert resp_null.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
-
-        # OPTIONS preflight from local file://
-        for ep in ["/api/stats", "/api/alerts"]:
-            resp_preflight = client.open(ep, method="OPTIONS", headers={"Origin": "null"})
-            assert resp_preflight.status_code == 204
-            assert resp_preflight.headers.get("Access-Control-Allow-Origin") == "null"
-            assert resp_preflight.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
+            assert "Access-Control-Allow-Origin" not in resp_null.headers
 
         # Untrusted origin
         resp_untrusted = client.get("/api/stats", headers={"Origin": "http://attacker.example.com"})
         assert "Access-Control-Allow-Origin" not in resp_untrusted.headers
+
+        # With explicit opt-in (ALLOW_LOCAL_FILE_CORS = True), Origin: null is permitted
+        monkeypatch.setattr("backend.api.ALLOW_LOCAL_FILE_CORS", True)
+        for ep in ["/api/stats", "/api/alerts"]:
+            resp_optin = client.get(ep, headers={"Origin": "null"})
+            assert resp_optin.status_code == 200
+            assert resp_optin.headers.get("Access-Control-Allow-Origin") == "null"
+            assert resp_optin.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
+
+            resp_preflight = client.open(ep, method="OPTIONS", headers={"Origin": "null"})
+            assert resp_preflight.status_code == 204
+            assert resp_preflight.headers.get("Access-Control-Allow-Origin") == "null"
+            assert resp_preflight.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
 
     def test_health_check_endpoint(self, client):
         """Verify /health and /api/health return healthy status and database connectivity."""

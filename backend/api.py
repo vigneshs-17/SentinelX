@@ -14,6 +14,7 @@ from config.settings import (
     API_DEBUG,
     API_DEFAULT_LIMIT,
     API_MAX_LIMIT,
+    ALLOW_LOCAL_FILE_CORS,
     CORS_ALLOWED_ORIGINS,
 )
 from database.database import get_connection
@@ -109,10 +110,18 @@ def apply_security_headers(response: Response) -> Response:
 
     # CORS permissions scoped to allowed local origins
     origin = request.headers.get("Origin")
-    if origin and origin in CORS_ALLOWED_ORIGINS:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    if origin:
+        allowed = False
+        if origin == "null":
+            if ALLOW_LOCAL_FILE_CORS or "null" in CORS_ALLOWED_ORIGINS:
+                allowed = True
+        elif origin in CORS_ALLOWED_ORIGINS:
+            allowed = True
+
+        if allowed:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
 
     return response
 

@@ -1,6 +1,7 @@
 {
   "model_version": "2.0.0",
   "model_type": "RandomForestClassifier",
+  "model_sha256": "5f541891d0c97e5ef950f065d5d5156e62e0b4761d9419e9ac8eecba0e1ee24d",
   "created_at": "2026-09-11T07:25:45.503363+00:00",
   "random_state": 42,
   "features": [

@@ -1,9 +1,16 @@
+import hashlib
+import json
 import joblib
 import pandas as pd
 from pathlib import Path
 from typing import Tuple, Optional, Any
 
 from ml.feature_extractor import extract_features
+
+
+class ModelIntegrityError(ValueError):
+    """Raised when machine learning model cryptographic checksum verification fails."""
+    pass
 
 
 # ---------------------------------------------------------
@@ -29,13 +36,57 @@ FEATURE_COLUMNS = [
 _cached_model = None
 
 
-def get_model(custom_path: Optional[Path] = None):
-    """Safely returns the loaded ML model, with deterministic caching."""
+def calculate_model_sha256(path: Path) -> str:
+    """Computes SHA256 checksum of the target model file."""
+    sha256_hash = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            sha256_hash.update(chunk)
+    return sha256_hash.hexdigest()
+
+
+def verify_model_integrity(model_path: Path, metadata_path: Optional[Path] = None) -> str:
+    """
+    Verifies that model_path matches the cryptographic SHA256 recorded in metadata.
+    Raises ModelIntegrityError if metadata is missing, malformed, or checksum mismatches.
+    Returns: verified expected SHA256 hash string.
+    """
+    meta_file = metadata_path or (model_path.parent / "model_metadata.json")
+    if not meta_file.exists():
+        raise ModelIntegrityError(f"Model metadata file missing: {meta_file}")
+
+    try:
+        with open(meta_file, "r", encoding="utf-8") as f:
+            metadata = json.load(f)
+    except Exception as err:
+        raise ModelIntegrityError(f"Malformed model metadata JSON in {meta_file}: {err}") from err
+
+    expected_sha256 = metadata.get("model_sha256")
+    if not expected_sha256:
+        raise ModelIntegrityError(f"Missing 'model_sha256' in model metadata: {meta_file}")
+
+    actual_sha256 = calculate_model_sha256(model_path)
+    if actual_sha256.lower() != expected_sha256.lower():
+        raise ModelIntegrityError(
+            f"Model integrity verification failed for {model_path}. "
+            f"Expected SHA256: {expected_sha256}, Actual: {actual_sha256}. "
+            f"Model file may have been tampered with or corrupted."
+        )
+
+    return expected_sha256.lower()
+
+
+def get_model(custom_path: Optional[Path] = None, metadata_path: Optional[Path] = None):
+    """Safely verifies SHA256 checksum and returns the loaded ML model, with deterministic caching."""
     global _cached_model
-    path = custom_path or MODEL_PATH
+    path = Path(custom_path) if custom_path else MODEL_PATH
     if _cached_model is None or custom_path is not None:
         if not path.exists():
             raise FileNotFoundError(f"Trained model not found at: {path}")
+
+        # P0 Security: Verify cryptographic hash BEFORE calling joblib.load
+        verify_model_integrity(path, metadata_path=metadata_path)
+
         _cached_model = joblib.load(path)
     return _cached_model
 

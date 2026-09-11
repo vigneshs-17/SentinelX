@@ -45,11 +45,12 @@ API_PORT = int(os.getenv("SENTINELX_API_PORT", "5000"))
 API_DEBUG = os.getenv("SENTINELX_API_DEBUG", "false").lower() == "true"
 API_DEFAULT_LIMIT = int(os.getenv("SENTINELX_API_DEFAULT_LIMIT", "100"))
 API_MAX_LIMIT = int(os.getenv("SENTINELX_API_MAX_LIMIT", "500"))
+ALLOW_LOCAL_FILE_CORS = os.getenv("SENTINELX_ALLOW_LOCAL_FILE_CORS", "false").lower() == "true"
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "SENTINELX_CORS_ORIGINS",
-        "http://127.0.0.1:5000,http://localhost:5000,null"
+        "http://127.0.0.1:5000,http://localhost:5000"
     ).split(",")
     if origin.strip()
 ]
