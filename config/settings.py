@@ -1,3 +1,5 @@
+import os
+
 # SentinelX Detection Configuration
 
 # Canonical Threat Types
@@ -17,3 +19,13 @@ PORT_SCAN_ALERT_COOLDOWN = 30
 HIGH_TRAFFIC_PACKET_THRESHOLD = 1000
 HIGH_TRAFFIC_TIME_WINDOW = 5
 HIGH_TRAFFIC_RESET_THRESHOLD = 200
+
+# Pipeline & Architecture Configuration
+CAPTURE_MODE = os.getenv("SENTINELX_MODE", "live").lower()
+CAPTURE_INTERFACE = os.getenv("SENTINELX_INTERFACE", None)
+PCAP_FILE_PATH = os.getenv("SENTINELX_PCAP_PATH", None)
+QUEUE_MAXSIZE = int(os.getenv("SENTINELX_QUEUE_SIZE", "10000"))
+WORKER_COUNT = int(os.getenv("SENTINELX_WORKERS", "1"))
+QUEUE_TIMEOUT = float(os.getenv("SENTINELX_QUEUE_TIMEOUT", "0.5"))
+LOG_LEVEL = os.getenv("SENTINELX_LOG_LEVEL", "INFO")
+ML_ALERT_COOLDOWN = int(os.getenv("SENTINELX_ML_ALERT_COOLDOWN", "30"))

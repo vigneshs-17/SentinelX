@@ -1,0 +1,72 @@
+import time
+import pytest
+from scapy.all import IP, TCP
+
+from capture.pipeline import PacketPipeline
+from capture.packet_parser import parse_packet
+from detection.rule_engine import detect_port_scan, connection_tracker, last_scan_alert_time
+from detection.traffic_rules import detect_high_traffic, packet_tracker, alert_active
+
+
+def make_benchmark_packet(port: int):
+    return (
+        IP(src="192.168.1.50", dst="192.168.1.1")
+        / TCP(sport=40000 + (port % 1000), dport=port, flags="S")
+    )
+
+
+def test_performance_benchmark_queue_vs_synchronous():
+    """
+    Controlled benchmark measuring producer latency:
+    Compares synchronous processing overhead against non-blocking queue enqueue.
+    """
+    connection_tracker.clear()
+    last_scan_alert_time.clear()
+    packet_tracker.clear()
+    alert_active.clear()
+
+    packet_count = 500
+    packets = [make_benchmark_packet(p) for p in range(packet_count)]
+
+    # 1. Measure synchronous in-band processing
+    def synchronous_handler(packet):
+        data = parse_packet(packet)
+        detect_port_scan(data)
+        detect_high_traffic(data)
+
+    sync_start = time.perf_counter()
+    for pkt in packets:
+        synchronous_handler(pkt)
+    sync_duration = time.perf_counter() - sync_start
+
+    # 2. Measure decoupled producer queue enqueue
+    pipeline = PacketPipeline(maxsize=10000, worker_count=1, processor=synchronous_handler)
+    pipeline.start()
+
+    enqueue_start = time.perf_counter()
+    for pkt in packets:
+        pipeline.enqueue(pkt)
+    enqueue_duration = time.perf_counter() - enqueue_start
+
+    # Wait for pipeline to finish draining
+    pipeline.stop(drain=True, timeout=5.0)
+
+    sync_pps = packet_count / sync_duration if sync_duration > 0 else float("inf")
+    enqueue_pps = packet_count / enqueue_duration if enqueue_duration > 0 else float("inf")
+    speedup = sync_duration / enqueue_duration if enqueue_duration > 0 else 1.0
+
+    print("\n" + "=" * 60)
+    print("      PERFORMANCE BENCHMARK: PRODUCER LATENCY")
+    print("=" * 60)
+    print(f"[*] Total Packets       : {packet_count}")
+    print(f"[*] Synchronous Ingest  : {sync_duration * 1000:.2f} ms ({sync_pps:.1f} packets/sec)")
+    print(f"[*] Queue Enqueue Ingest: {enqueue_duration * 1000:.2f} ms ({enqueue_pps:.1f} packets/sec)")
+    print(f"[*] Ingestion Speedup   : {speedup:.2f}x faster producer release")
+    print("=" * 60 + "\n")
+
+    # Producer enqueue must be faster than full synchronous execution
+    assert enqueue_duration < sync_duration, "Queue enqueue should be faster than full synchronous processing!"
+
+
+if __name__ == "__main__":
+    test_performance_benchmark_queue_vs_synchronous()

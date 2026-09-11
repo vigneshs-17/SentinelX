@@ -1,8 +1,19 @@
+import argparse
+import sys
 import threading
 import time
 
 from backend.api import app
-from capture.packet_capture import start_capture
+from capture.packet_capture import start_capture, process_packet
+from capture.pipeline import PacketPipeline
+from capture.pcap_replay import replay_pcap
+from config.settings import (
+    CAPTURE_MODE,
+    CAPTURE_INTERFACE,
+    PCAP_FILE_PATH,
+    WORKER_COUNT,
+    QUEUE_MAXSIZE,
+)
 
 
 def start_dashboard():
@@ -15,7 +26,38 @@ def start_dashboard():
     )
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="SentinelX - Network Intrusion Detection & Threat Monitoring System"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["live", "pcap"],
+        default=CAPTURE_MODE,
+        help="Capture mode: 'live' for network sniffing, 'pcap' for offline file replay (default: live)",
+    )
+    parser.add_argument(
+        "--pcap",
+        default=PCAP_FILE_PATH,
+        help="Path to PCAP file (required if --mode is pcap)",
+    )
+    parser.add_argument(
+        "--interface",
+        default=CAPTURE_INTERFACE,
+        help="Network interface to monitor in live mode (default: system default)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=WORKER_COUNT,
+        help=f"Number of packet processing worker threads (default: {WORKER_COUNT})",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_arguments()
+
     print("=" * 60)
     print("        SENTINELX")
     print("        Network Intrusion Detection &")
@@ -29,7 +71,6 @@ def main():
         target=start_dashboard,
         daemon=True
     )
-
     dashboard_thread.start()
 
     # Give Flask a moment to start
@@ -38,10 +79,22 @@ def main():
     print("[+] Dashboard available at:")
     print("[+] http://127.0.0.1:5000/\n")
 
-    # Start packet capture
-    print("[*] Starting network monitoring...\n")
+    pipeline = PacketPipeline(
+        maxsize=QUEUE_MAXSIZE,
+        worker_count=args.workers,
+        processor=process_packet,
+    )
 
-    start_capture()
+    if args.mode == "pcap":
+        if not args.pcap:
+            print("[!] Error: --pcap <file> is required when --mode is 'pcap'.")
+            sys.exit(1)
+
+        print(f"[*] Starting PCAP replay from: {args.pcap}\n")
+        replay_pcap(args.pcap, pipeline_instance=pipeline)
+    else:
+        print("[*] Starting network monitoring...\n")
+        start_capture(iface=args.interface, pipeline_instance=pipeline)
 
 
 if __name__ == "__main__":

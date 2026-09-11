@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -7,6 +8,8 @@ from database.database import insert_alert
 
 
 DEFAULT_ALERT_FILE = Path(__file__).parent / "alerts.json"
+
+_alert_log_lock = threading.Lock()
 
 
 def get_alert_file_path():
@@ -28,22 +31,24 @@ def log_alert(alert):
 
     alert_file = get_alert_file_path()
     alert_file.parent.mkdir(parents=True, exist_ok=True)
-    existing_alerts = []
 
-    if alert_file.exists():
-        try:
-            with open(alert_file, "r", encoding="utf-8") as file:
-                existing_alerts = json.load(file)
-        except (json.JSONDecodeError, OSError):
-            existing_alerts = []
+    with _alert_log_lock:
+        existing_alerts = []
 
-    existing_alerts.append(alert_record)
+        if alert_file.exists():
+            try:
+                with open(alert_file, "r", encoding="utf-8") as file:
+                    existing_alerts = json.load(file)
+            except (json.JSONDecodeError, OSError):
+                existing_alerts = []
 
-    with open(alert_file, "w", encoding="utf-8") as file:
-        json.dump(existing_alerts, file, indent=4)
+        existing_alerts.append(alert_record)
 
-    # Store the same alert in SQLite
-    insert_alert(alert_record)
+        with open(alert_file, "w", encoding="utf-8") as file:
+            json.dump(existing_alerts, file, indent=4)
+
+        # Store the same alert in SQLite
+        insert_alert(alert_record)
 
     return alert_record
 
