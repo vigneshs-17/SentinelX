@@ -26,7 +26,7 @@ The project demonstrates practical cybersecurity engineering concepts including 
 
 ## System Architecture
 
-SentinelX uses a decoupled **Producer-Consumer** architecture designed to prevent packet drops during heavy network bursts:
+SentinelX uses a decoupled **Producer-Consumer** architecture designed to isolate packet capture from downstream processing, reduce capture-path blocking, and provide bounded backpressure with explicit drop accounting:
 
 ```text
                +--------------------------------------------+
@@ -143,8 +143,8 @@ Detects abnormal network spikes from a single source host based on count, packet
 SentinelX implements a **hybrid gating architecture**:
 - **Secondary Verification:** Machine learning is not run blindly on every incoming packet. Instead, the Random Forest model is invoked only after a rule-based anomaly triggers. Normal traffic bypasses ML evaluation entirely, preserving pipeline throughput.
 - **Flow Features:** Evaluates `packet_size`, `source_port`, `destination_port`, `protocol`, and `tcp_syn`.
-- **Classification & Scoring:** Predicts threat classification (`PORT_SCAN`, `HIGH_TRAFFIC`, `NORMAL`) alongside ensemble voting confidence.
-- **Cryptographic Model Verification:** Before loading model weights from disk via `joblib.load()`, SentinelX calculates the SHA256 checksum of `sentinelx_model.pkl` and validates it against `model_metadata.json`. If metadata is missing or the hash mismatches, loading fails closed with `ModelIntegrityError`, preventing arbitrary code execution via untrusted pickle serialization.
+- **Classification & Scoring:** Predicts threat classification (`PORT_SCAN`, `HIGH_TRAFFIC`, `NORMAL`) alongside model score/probability estimates.
+- **Cryptographic Model Verification:** Before loading model weights from disk via `joblib.load()`, SentinelX calculates the SHA256 checksum of `sentinelx_model.pkl` and validates it against `model_metadata.json`. If metadata is missing or the hash mismatches, loading fails closed with `ModelIntegrityError`, which helps prevent loading tampered model bytes by verifying the model SHA256 against trusted metadata before deserialization.
 
 ---
 
