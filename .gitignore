@@ -12,3 +12,11 @@ logs/alerts.json
 *.log
 .env
 .vscode/
+
+# Local scratch artifacts
+Screenshot 2026-09-07 092417.png
+terminal 1 command.txt
+
+# Modern runtime alert logs
+logs/alerts.jsonl*
+
