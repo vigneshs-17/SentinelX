@@ -13,15 +13,18 @@ from config.settings import (
     PCAP_FILE_PATH,
     WORKER_COUNT,
     QUEUE_MAXSIZE,
+    API_HOST,
+    API_PORT,
+    API_DEBUG,
 )
 
 
 def start_dashboard():
-    print("[*] Starting SentinelX dashboard...")
+    print(f"[*] Starting SentinelX dashboard on {API_HOST}:{API_PORT}...")
     app.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=False,
+        host=API_HOST,
+        port=API_PORT,
+        debug=API_DEBUG,
         use_reloader=False
     )
 
@@ -77,7 +80,7 @@ def main():
     time.sleep(2)
 
     print("[+] Dashboard available at:")
-    print("[+] http://127.0.0.1:5000/\n")
+    print(f"[+] http://{API_HOST}:{API_PORT}/\n")
 
     pipeline = PacketPipeline(
         maxsize=QUEUE_MAXSIZE,
