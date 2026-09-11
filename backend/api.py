@@ -103,6 +103,22 @@ def apply_security_headers(response: Response) -> Response:
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-XSS-Protection"] = "1; mode=block"
 
+    # Restrictive Content-Security-Policy & Permissions-Policy
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self' http://127.0.0.1:5000; "
+        "img-src 'self' data:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'none'; "
+        "form-action 'none';"
+    )
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=(), "
+        "bluetooth=(), display-capture=(), clipboard-write=(self)"
+    )
+
     # Prevent caching of dynamic security alerts and statistics
     if request.path.startswith("/api/") or request.path in ("/health", "/api/health"):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"

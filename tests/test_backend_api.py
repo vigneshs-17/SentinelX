@@ -129,14 +129,46 @@ class TestBackendApi:
         assert "eval(" not in content
 
     def test_security_headers_present_on_all_responses(self, client):
-        """Verify defensive HTTP security headers are injected into all HTTP responses."""
-        endpoints = ["/", "/health", "/api/alerts", "/api/stats"]
+        """Verify defensive HTTP security headers including CSP and Permissions-Policy are injected into all HTTP responses."""
+        endpoints = ["/", "/health", "/api/health", "/api/alerts", "/api/stats"]
+        expected_csp_parts = [
+            "default-src 'none'",
+            "script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'",
+            "connect-src 'self' http://127.0.0.1:5000",
+            "img-src 'self' data:",
+            "frame-ancestors 'none'",
+            "base-uri 'none'",
+            "form-action 'none'",
+        ]
+        expected_perm_parts = [
+            "camera=()",
+            "microphone=()",
+            "geolocation=()",
+            "payment=()",
+            "usb=()",
+            "bluetooth=()",
+            "display-capture=()",
+            "clipboard-write=(self)",
+        ]
         for ep in endpoints:
             response = client.get(ep)
             assert response.headers.get("X-Content-Type-Options") == "nosniff", f"Missing nosniff on {ep}"
             assert response.headers.get("X-Frame-Options") == "SAMEORIGIN", f"Missing SAMEORIGIN on {ep}"
             assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin", f"Missing Referrer-Policy on {ep}"
             assert response.headers.get("X-XSS-Protection") == "1; mode=block", f"Missing X-XSS-Protection on {ep}"
+
+            # Content-Security-Policy
+            csp = response.headers.get("Content-Security-Policy", "")
+            assert csp, f"Missing Content-Security-Policy on {ep}"
+            for part in expected_csp_parts:
+                assert part in csp, f"Directive '{part}' missing from CSP on {ep}"
+
+            # Permissions-Policy
+            perm = response.headers.get("Permissions-Policy", "")
+            assert perm, f"Missing Permissions-Policy on {ep}"
+            for part in expected_perm_parts:
+                assert part in perm, f"Directive '{part}' missing from Permissions-Policy on {ep}"
 
     def test_dynamic_api_cache_control_headers(self, client):
         """Verify dynamic API and health endpoints forbid client/proxy caching."""
