@@ -8,15 +8,31 @@ def parse_packet(packet):
         "protocol": "OTHER",
         "source_port": None,
         "destination_port": None,
-        "packet_size": len(packet),
-        "tcp_syn": False
+        "packet_size": 0,
+        "tcp_syn": False,
     }
 
-    if IP in packet:
+    if packet is None:
+        return packet_data
+
+    # Safely extract packet_size if packet supports len()
+    try:
+        packet_data["packet_size"] = len(packet)
+    except (TypeError, AttributeError):
+        packet_data["packet_size"] = 0
+
+    # Ensure packet supports Scapy layer membership checking
+    try:
+        has_ip = IP in packet
+        has_ipv6 = IPv6 in packet
+    except (TypeError, AttributeError):
+        return packet_data
+
+    if has_ip:
         packet_data["source_ip"] = packet[IP].src
         packet_data["destination_ip"] = packet[IP].dst
         default_proto = "IP"
-    elif IPv6 in packet:
+    elif has_ipv6:
         packet_data["source_ip"] = packet[IPv6].src
         packet_data["destination_ip"] = packet[IPv6].dst
         default_proto = "IPv6"

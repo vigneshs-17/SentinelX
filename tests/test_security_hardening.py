@@ -378,3 +378,83 @@ class TestIPv6PacketParsing:
         assert parsed["destination_ip"] == "192.168.1.1"
         assert parsed["protocol"] == "TCP"
         assert parsed["tcp_syn"] is True
+
+
+class TestPacketParserValidation:
+    """Regression tests ensuring parse_packet handles non-packet and invalid inputs safely."""
+
+    def test_parse_packet_none(self):
+        """parse_packet(None) must return safe default structure with packet_size=0 and no exception."""
+        parsed = parse_packet(None)
+        assert isinstance(parsed, dict)
+        assert parsed["source_ip"] is None
+        assert parsed["destination_ip"] is None
+        assert parsed["protocol"] == "OTHER"
+        assert parsed["source_port"] is None
+        assert parsed["destination_port"] is None
+        assert parsed["packet_size"] == 0
+        assert parsed["tcp_syn"] is False
+
+    def test_parse_packet_without_len(self):
+        """Objects without __len__ (e.g. int, object) must return default structure with packet_size=0."""
+        for invalid in [12345, object(), True]:
+            parsed = parse_packet(invalid)
+            assert isinstance(parsed, dict)
+            assert parsed["protocol"] == "OTHER"
+            assert parsed["packet_size"] == 0
+
+    def test_parse_packet_with_len_invalid_packet(self):
+        """Objects with __len__ but invalid packet structure must return default structure safely."""
+        for invalid in ["not_a_packet", b"arbitrary_binary_payload", [1, 2, 3], {}]:
+            parsed = parse_packet(invalid)
+            assert isinstance(parsed, dict)
+            assert parsed["protocol"] == "OTHER"
+            assert parsed["packet_size"] == len(invalid)
+
+    def test_parse_packet_valid_ipv4_tcp(self):
+        """Valid IPv4 TCP SYN packet extracts IPs, ports, size, and protocol."""
+        pkt = IP(src="10.0.0.1", dst="10.0.0.2") / TCP(sport=8080, dport=443, flags="S")
+        parsed = parse_packet(pkt)
+        assert parsed["source_ip"] == "10.0.0.1"
+        assert parsed["destination_ip"] == "10.0.0.2"
+        assert parsed["protocol"] == "TCP"
+        assert parsed["source_port"] == 8080
+        assert parsed["destination_port"] == 443
+        assert parsed["tcp_syn"] is True
+        assert parsed["packet_size"] == len(pkt)
+
+    def test_parse_packet_valid_ipv4_udp(self):
+        """Valid IPv4 UDP packet extracts IPs, ports, size, and protocol."""
+        pkt = IP(src="10.0.0.1", dst="10.0.0.2") / UDP(sport=53, dport=12345)
+        parsed = parse_packet(pkt)
+        assert parsed["source_ip"] == "10.0.0.1"
+        assert parsed["destination_ip"] == "10.0.0.2"
+        assert parsed["protocol"] == "UDP"
+        assert parsed["source_port"] == 53
+        assert parsed["destination_port"] == 12345
+        assert parsed["tcp_syn"] is False
+        assert parsed["packet_size"] == len(pkt)
+
+    def test_parse_packet_valid_ipv6_tcp(self):
+        """Valid IPv6 TCP packet extracts IPv6 addresses, ports, and protocol."""
+        pkt = IPv6(src="2001:db8::1", dst="2001:db8::2") / TCP(sport=9000, dport=22, flags="S")
+        parsed = parse_packet(pkt)
+        assert parsed["source_ip"] == "2001:db8::1"
+        assert parsed["destination_ip"] == "2001:db8::2"
+        assert parsed["protocol"] == "TCP"
+        assert parsed["source_port"] == 9000
+        assert parsed["destination_port"] == 22
+        assert parsed["tcp_syn"] is True
+        assert parsed["packet_size"] == len(pkt)
+
+    def test_parse_packet_valid_ipv6_udp(self):
+        """Valid IPv6 UDP packet extracts IPv6 addresses, ports, and protocol."""
+        pkt = IPv6(src="fe80::1", dst="fe80::2") / UDP(sport=5353, dport=5353)
+        parsed = parse_packet(pkt)
+        assert parsed["source_ip"] == "fe80::1"
+        assert parsed["destination_ip"] == "fe80::2"
+        assert parsed["protocol"] == "UDP"
+        assert parsed["source_port"] == 5353
+        assert parsed["destination_port"] == 5353
+        assert parsed["tcp_syn"] is False
+        assert parsed["packet_size"] == len(pkt)

@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+import threading
 import time
 from typing import Optional, Dict
 
@@ -13,6 +14,9 @@ from config.settings import (
     DETECTION_STATE_TTL,
 )
 
+
+# Concurrency lock protecting traffic history and sliding window state
+_traffic_lock = threading.Lock()
 
 # Backward-compatible tracking structures
 packet_tracker = defaultdict(list)
@@ -82,46 +86,50 @@ def detect_high_traffic(packet_data: dict) -> Optional[dict]:
         return None
 
     current_time = time.time()
-
-    # Synchronize backward-compatible packet_tracker
-    packet_tracker[source_ip].append(current_time)
     cutoff = current_time - HIGH_TRAFFIC_TIME_WINDOW
-    packet_tracker[source_ip] = [
-        ts for ts in packet_tracker[source_ip]
-        if ts >= cutoff
-    ]
-    compat_packet_count = len(packet_tracker[source_ip])
 
-    # Synchronize rate tracker deque (timestamp, byte_size)
-    history = _traffic_history[source_ip]
-    history.append((current_time, packet_size))
+    with _traffic_lock:
+        # Synchronize backward-compatible packet_tracker
+        tracker = packet_tracker[source_ip]
+        tracker.append(current_time)
+        packet_tracker[source_ip] = [
+            ts for ts in tracker
+            if ts >= cutoff
+        ]
+        compat_packet_count = len(packet_tracker[source_ip])
 
-    # O(1) sliding window prune
-    while history and history[0][0] < cutoff:
-        history.popleft()
+        # Synchronize rate tracker deque (timestamp, byte_size)
+        history = _traffic_history[source_ip]
+        history.append((current_time, packet_size))
 
-    packet_count = max(compat_packet_count, len(history))
-    total_bytes = sum(entry[1] for entry in history)
+        # O(1) sliding window prune
+        while history and history[0][0] < cutoff:
+            history.popleft()
 
-    effective_window = max(0.1, HIGH_TRAFFIC_TIME_WINDOW)
-    packet_rate = packet_count / effective_window
-    byte_rate = total_bytes / effective_window
+        packet_count = max(compat_packet_count, len(history))
+        total_bytes = sum(entry[1] for entry in history)
 
-    # Reset alert state when traffic drops sufficiently (backward-compatible)
-    if packet_count <= HIGH_TRAFFIC_RESET_THRESHOLD:
-        alert_active[source_ip] = False
+        effective_window = max(0.1, HIGH_TRAFFIC_TIME_WINDOW)
+        packet_rate = packet_count / effective_window
+        byte_rate = total_bytes / effective_window
 
-    # Check alert conditions:
-    # 1. Packet count threshold reached (e.g. 1000 packets)
-    # 2. Packet rate threshold reached (e.g. 200 pps) with minimum 50 packets
-    # 3. Byte rate threshold reached (e.g. 2 MB/s) with minimum 50 packets
-    is_anomaly = (
-        packet_count >= HIGH_TRAFFIC_PACKET_THRESHOLD
-        or (packet_rate >= HIGH_TRAFFIC_PACKET_RATE_THRESHOLD and packet_count >= 50)
-        or (byte_rate >= HIGH_TRAFFIC_BYTE_RATE_THRESHOLD and packet_count >= 50)
-    )
+        # Reset alert state when traffic drops sufficiently (backward-compatible)
+        if packet_count <= HIGH_TRAFFIC_RESET_THRESHOLD:
+            alert_active[source_ip] = False
 
-    if is_anomaly:
+        # Check alert conditions:
+        # 1. Packet count threshold reached (e.g. 1000 packets)
+        # 2. Packet rate threshold reached (e.g. 200 pps) with minimum 50 packets
+        # 3. Byte rate threshold reached (e.g. 2 MB/s) with minimum 50 packets
+        is_anomaly = (
+            packet_count >= HIGH_TRAFFIC_PACKET_THRESHOLD
+            or (packet_rate >= HIGH_TRAFFIC_PACKET_RATE_THRESHOLD and packet_count >= 50)
+            or (byte_rate >= HIGH_TRAFFIC_BYTE_RATE_THRESHOLD and packet_count >= 50)
+        )
+
+        if not is_anomaly:
+            return None
+
         # Cooldown & active suppression check
         last_alert = _last_alert_time.get(source_ip)
         in_cooldown = (
@@ -135,37 +143,36 @@ def detect_high_traffic(packet_data: dict) -> Optional[dict]:
         alert_active[source_ip] = True
         _last_alert_time[source_ip] = current_time
 
-        confidence = _calculate_traffic_confidence(
-            max(packet_rate, packet_count / HIGH_TRAFFIC_TIME_WINDOW),
-            HIGH_TRAFFIC_PACKET_RATE_THRESHOLD,
-        )
+    # Payload generation outside critical section
+    confidence = _calculate_traffic_confidence(
+        max(packet_rate, packet_count / HIGH_TRAFFIC_TIME_WINDOW),
+        HIGH_TRAFFIC_PACKET_RATE_THRESHOLD,
+    )
 
-        return {
-            "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
-            "severity": "HIGH",
-            "confidence": confidence,
-            "source_ip": source_ip,
-            "destination_ip": destination_ip,
-            "protocol": protocol,
+    return {
+        "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+        "severity": "HIGH",
+        "confidence": confidence,
+        "source_ip": source_ip,
+        "destination_ip": destination_ip,
+        "protocol": protocol,
+        "packet_count": packet_count,
+        "packet_rate": round(packet_rate, 1),
+        "byte_rate": round(byte_rate, 1),
+        "evidence": {
+            "observation_window_seconds": HIGH_TRAFFIC_TIME_WINDOW,
             "packet_count": packet_count,
-            "packet_rate": round(packet_rate, 1),
-            "byte_rate": round(byte_rate, 1),
-            "evidence": {
-                "observation_window_seconds": HIGH_TRAFFIC_TIME_WINDOW,
-                "packet_count": packet_count,
-                "packet_rate_pps": round(packet_rate, 1),
-                "packet_rate_threshold_pps": HIGH_TRAFFIC_PACKET_RATE_THRESHOLD,
-                "byte_rate_bps": round(byte_rate, 1),
-                "byte_rate_threshold_bps": HIGH_TRAFFIC_BYTE_RATE_THRESHOLD,
-                "total_bytes": total_bytes,
-            },
-            "message": (
-                f"Abnormally high traffic detected from {source_ip} "
-                f"({packet_count} packets, {packet_rate:.1f} pps in {HIGH_TRAFFIC_TIME_WINDOW:.0f}s)"
-            ),
-        }
-
-    return None
+            "packet_rate_pps": round(packet_rate, 1),
+            "packet_rate_threshold_pps": HIGH_TRAFFIC_PACKET_RATE_THRESHOLD,
+            "byte_rate_bps": round(byte_rate, 1),
+            "byte_rate_threshold_bps": HIGH_TRAFFIC_BYTE_RATE_THRESHOLD,
+            "total_bytes": total_bytes,
+        },
+        "message": (
+            f"Abnormally high traffic detected from {source_ip} "
+            f"({packet_count} packets, {packet_rate:.1f} pps in {HIGH_TRAFFIC_TIME_WINDOW:.0f}s)"
+        ),
+    }
 
 
 def cleanup_traffic_state(now: Optional[float] = None, ttl: float = DETECTION_STATE_TTL) -> int:
@@ -173,18 +180,16 @@ def cleanup_traffic_state(now: Optional[float] = None, ttl: float = DETECTION_ST
     current_time = now if now is not None else time.time()
     cutoff = current_time - ttl
 
-    expired_ips = [
-        ip for ip, history in list(_traffic_history.items())
-        if not history or history[-1][0] < cutoff
-    ]
+    with _traffic_lock:
+        expired_ips = [
+            ip for ip, history in list(_traffic_history.items())
+            if not history or history[-1][0] < cutoff
+        ]
 
-    for ip in expired_ips:
-        del _traffic_history[ip]
-        if ip in packet_tracker:
-            del packet_tracker[ip]
-        if ip in alert_active:
-            del alert_active[ip]
-        if ip in _last_alert_time:
-            del _last_alert_time[ip]
+        for ip in expired_ips:
+            _traffic_history.pop(ip, None)
+            packet_tracker.pop(ip, None)
+            alert_active.pop(ip, None)
+            _last_alert_time.pop(ip, None)
 
-    return len(expired_ips)
+        return len(expired_ips)
