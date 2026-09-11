@@ -79,17 +79,21 @@ def process_packet(packet):
     # =====================================================
     if ml_prediction is not None and ml_prediction == threat_type:
         confirmed_alert = {
+            **rule_alert,
             "threat_type": threat_type,
             "severity": rule_alert["severity"],
             "source_ip": source_ip,
             "destination_ip": packet_data["destination_ip"],
             "protocol": packet_data["protocol"],
+            "ml_confirmed": True,
             "message": (
                 f"Rule engine and machine learning "
                 f"model both detected possible "
                 f"{threat_type}"
             ),
         }
+
+        pipeline.metrics.record_alert()
 
         safe_print(
             f"\n[ALERT - CONFIRMED] "
@@ -105,6 +109,9 @@ def process_packet(packet):
     # =====================================================
     rule_alert["destination_ip"] = packet_data["destination_ip"]
     rule_alert["protocol"] = packet_data["protocol"]
+    rule_alert["ml_confirmed"] = False
+
+    pipeline.metrics.record_alert()
 
     safe_print(
         f"\n[ALERT - RULE] "
