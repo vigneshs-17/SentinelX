@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import shutil
+import warnings
 import joblib
 import pandas as pd
 from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
@@ -12,6 +13,16 @@ from ml.evaluation.metrics import (
     compute_comprehensive_metrics,
     format_confusion_matrix_ascii,
 )
+from ml.predictor import (
+    calculate_model_sha256,
+    _model_lock,
+    invalidate_model_cache,
+)
+
+
+class ModelActivationError(RuntimeError):
+    """Raised when machine learning model or metadata activation fails during deployment."""
+    pass
 
 
 FEATURE_COLUMNS = [
@@ -135,19 +146,80 @@ def train_and_evaluate_improved_model(
             f"F1={p['f1_score']:.4f}  FPR={p['false_positive_rate']:.4f}  FNR={p['false_negative_rate']:.4f}"
         )
 
-    # 6. Save Versioned Models
+    # 6. Save Versioned Model Archive
     v2_path = mod_dir / "sentinelx_model_v2.pkl"
-    prod_path = mod_dir / "sentinelx_model.pkl"
-
     joblib.dump(best_model, v2_path)
-    joblib.dump(best_model, prod_path)
-    print(f"\n[+] Saved improved model to: {v2_path}")
-    print(f"[+] Updated active model at: {prod_path}")
+    print(f"\n[+] Saved improved model archive to: {v2_path}")
 
-    # 7. Write Model Metadata
+    # -------------------------------------------------------------------------
+    # TWO-PHASE STAGING, BACKUP, CONTROLLED ACTIVATION & ROLLBACK SEQUENCE
+    # -------------------------------------------------------------------------
+    # Filesystem-level atomicity limitation:
+    # Standard operating system filesystems (such as NTFS, ext4, APFS) do not provide
+    # atomic replacement across multiple distinct directory entries in a single
+    # filesystem transaction.
+    #
+    # To guarantee application-level consistency and prevent desynchronization
+    # between model weights (sentinelx_model.pkl) and integrity checksums (model_metadata.json):
+    #   1. Phase A (Staging): Serialize candidate model and metadata to isolated
+    #      temporary files (.tmp). Cryptographic SHA256 is computed directly on the
+    #      staged model bytes before any activation.
+    #   2. Phase B (Backup): Snapshot currently active production artifacts to
+    #      backup files (.prev) in the same directory.
+    #   3. Phase C (Controlled Activation & Concurrency Protection): Under _model_lock,
+    #      sequentially replace the model then metadata using filesystem replacement.
+    #      If any error occurs during replacement or post-verification, both artifacts
+    #      are immediately rolled back from .prev, restoring previous state.
+    #   4. Post-Activation Verification: Live active model SHA256 is verified against
+    #      metadata, in-memory model cache is invalidated, and backups are purged.
+    #   5. Predictor Fail-Closed Design: If an unexpected crash occurs between the
+    #      two atomic file replacements, the predictor fails closed (ModelIntegrityError)
+    #      rather than running with mismatched or untrusted weights.
+    # -------------------------------------------------------------------------
+
+    prod_path = mod_dir / "sentinelx_model.pkl"
+    metadata_path = mod_dir / "model_metadata.json"
+
+    staged_model_path = prod_path.with_name(f"{prod_path.name}.tmp")
+    staged_metadata_path = metadata_path.with_name(f"{metadata_path.name}.tmp")
+    backup_model_path = prod_path.with_name(f"{prod_path.name}.prev")
+    backup_metadata_path = metadata_path.with_name(f"{metadata_path.name}.prev")
+
+    # Issue 1: Handle existing metadata and detect corruption
+    existing_meta = {}
+    if metadata_path.exists():
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                existing_meta = json.load(f)
+        except Exception as err:
+            timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            corrupt_backup = metadata_path.with_name(f"{metadata_path.name}.corrupt.{timestamp_str}.bak")
+            if corrupt_backup.exists():
+                timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+                corrupt_backup = metadata_path.with_name(f"{metadata_path.name}.corrupt.{timestamp_str}.bak")
+            shutil.copy2(metadata_path, corrupt_backup)
+            warn_msg = (
+                f"Existing model metadata at '{metadata_path}' was malformed JSON ({err}). "
+                f"Preserved corrupt metadata to '{corrupt_backup.name}'. Generating fresh metadata."
+            )
+            warnings.warn(warn_msg, UserWarning)
+            print(f"\n[!] WARNING: {warn_msg}")
+            existing_meta = {}
+
+    # Phase A: Staging candidate artifacts
+    # 1. Serialize model to staging file
+    joblib.dump(best_model, staged_model_path)
+
+    # 2. Compute cryptographic SHA256 on the staged candidate model file
+    staged_sha256 = calculate_model_sha256(staged_model_path)
+    print(f"[+] Staged candidate model SHA256: {staged_sha256}")
+
+    # 3. Assemble and serialize staged metadata
     metadata = {
+        **existing_meta,
         "model_version": "2.0.0",
         "model_type": "RandomForestClassifier",
+        "model_sha256": staged_sha256,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "random_state": random_state,
         "features": FEATURE_COLUMNS,
@@ -179,10 +251,90 @@ def train_and_evaluate_improved_model(
         ],
     }
 
-    metadata_path = mod_dir / "model_metadata.json"
-    with open(metadata_path, "w", encoding="utf-8") as f:
+    with open(staged_metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
-    print(f"[+] Saved model metadata to: {metadata_path}")
+
+    # Phase B: Backup active production artifacts
+    had_active_model = prod_path.exists()
+    had_active_metadata = metadata_path.exists()
+
+    if had_active_model:
+        shutil.copy2(prod_path, backup_model_path)
+    if had_active_metadata:
+        shutil.copy2(metadata_path, backup_metadata_path)
+
+    # Phase C: Controlled Activation & Rollback under Concurrency Protection
+    model_replaced = False
+    metadata_replaced = False
+
+    with _model_lock:
+        try:
+            # 1. Replace model file
+            staged_model_path.replace(prod_path)
+            model_replaced = True
+
+            # 2. Replace metadata file
+            staged_metadata_path.replace(metadata_path)
+            metadata_replaced = True
+
+            # 3. Post-activation verification
+            active_sha256 = calculate_model_sha256(prod_path)
+            if active_sha256.lower() != staged_sha256.lower():
+                raise ModelActivationError(
+                    f"Post-activation checksum mismatch! Staged: {staged_sha256}, Active: {active_sha256}"
+                )
+
+            # 4. Invalidate predictor in-memory cache
+            invalidate_model_cache()
+
+            # 5. Clean up backup files on success
+            if backup_model_path.exists():
+                backup_model_path.unlink()
+            if backup_metadata_path.exists():
+                backup_metadata_path.unlink()
+
+            print(f"[+] Successfully activated production model at: {prod_path}")
+            print(f"[+] Successfully activated model metadata at: {metadata_path}")
+
+        except Exception as exc:
+            print(f"\n[!] CRITICAL ERROR during model activation: {exc}")
+            print("[*] Initiating rollback to previous artifacts...")
+
+            # Rollback sequence
+            if model_replaced:
+                if had_active_model and backup_model_path.exists():
+                    try:
+                        backup_model_path.replace(prod_path)
+                    except Exception as r_err:
+                        print(f"[!] Rollback model replacement failed: {r_err}")
+                elif not had_active_model:
+                    prod_path.unlink(missing_ok=True)
+
+            if metadata_replaced:
+                if had_active_metadata and backup_metadata_path.exists():
+                    try:
+                        backup_metadata_path.replace(metadata_path)
+                    except Exception as r_err:
+                        print(f"[!] Rollback metadata replacement failed: {r_err}")
+                elif not had_active_metadata:
+                    metadata_path.unlink(missing_ok=True)
+
+            # Clean up residual staging and backup files
+            if staged_model_path.exists():
+                staged_model_path.unlink(missing_ok=True)
+            if staged_metadata_path.exists():
+                staged_metadata_path.unlink(missing_ok=True)
+            if backup_model_path.exists():
+                backup_model_path.unlink(missing_ok=True)
+            if backup_metadata_path.exists():
+                backup_metadata_path.unlink(missing_ok=True)
+
+            # Re-invalidate cache to ensure predictor doesn't hold stale state
+            invalidate_model_cache()
+
+            raise ModelActivationError(
+                f"Model activation failed and was safely rolled back: {exc}"
+            ) from exc
 
     # 8. Save Evaluation JSON Report
     report_json_path = rep_dir / "improved_evaluation.json"

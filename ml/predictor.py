@@ -3,6 +3,7 @@ import json
 import joblib
 import pandas as pd
 from pathlib import Path
+import threading
 from typing import Tuple, Optional, Any
 
 from ml.feature_extractor import extract_features
@@ -32,8 +33,19 @@ FEATURE_COLUMNS = [
     "tcp_syn",
 ]
 
-# Cached model instance
+# ---------------------------------------------------------
+# Concurrency lock & Cache Management
+# ---------------------------------------------------------
+
+_model_lock = threading.RLock()
 _cached_model = None
+
+
+def invalidate_model_cache() -> None:
+    """Invalidates the in-memory cached model instance so the next inference reload pulls fresh bytes."""
+    global _cached_model
+    with _model_lock:
+        _cached_model = None
 
 
 def calculate_model_sha256(path: Path) -> str:
@@ -79,16 +91,17 @@ def verify_model_integrity(model_path: Path, metadata_path: Optional[Path] = Non
 def get_model(custom_path: Optional[Path] = None, metadata_path: Optional[Path] = None):
     """Safely verifies SHA256 checksum and returns the loaded ML model, with deterministic caching."""
     global _cached_model
-    path = Path(custom_path) if custom_path else MODEL_PATH
-    if _cached_model is None or custom_path is not None:
-        if not path.exists():
-            raise FileNotFoundError(f"Trained model not found at: {path}")
+    with _model_lock:
+        path = Path(custom_path) if custom_path else MODEL_PATH
+        if _cached_model is None or custom_path is not None:
+            if not path.exists():
+                raise FileNotFoundError(f"Trained model not found at: {path}")
 
-        # P0 Security: Verify cryptographic hash BEFORE calling joblib.load
-        verify_model_integrity(path, metadata_path=metadata_path)
+            # P0 Security: Verify cryptographic hash BEFORE calling joblib.load
+            verify_model_integrity(path, metadata_path=metadata_path)
 
-        _cached_model = joblib.load(path)
-    return _cached_model
+            _cached_model = joblib.load(path)
+        return _cached_model
 
 
 # Load default model at import time for backward compatibility

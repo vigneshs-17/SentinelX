@@ -133,6 +133,8 @@ class TestMLPipeline:
 
         assert meta["model_version"] == "2.0.0"
         assert meta["model_type"] == "RandomForestClassifier"
+        assert "model_sha256" in meta
+        assert len(meta["model_sha256"]) == 64
         assert meta["hyperparameters"]["class_weight"] == "balanced"
         assert meta["hyperparameters"]["max_depth"] == 10
         assert "limitations" in meta
