@@ -249,7 +249,7 @@ http://127.0.0.1:5000/
 
 ## Verification & Testing
 
-SentinelX includes a comprehensive automated test suite with 130 tests covering detection logic, ML verification, API contracts, security hardening, and multi-worker concurrency:
+SentinelX includes a comprehensive automated test suite with 130 tests covering detection logic, ML verification, API contracts, security hardening, and multi-worker concurrency, along with automated CI quality gates:
 
 ```bash
 # Run the full test suite
@@ -260,6 +260,15 @@ pytest -q
 
 # Run performance benchmarks
 pytest -s tests/test_performance_benchmark.py
+
+# Run code quality linting (Ruff)
+ruff check .
+
+# Run static application security testing (Bandit)
+bandit -c bandit.yaml -r backend capture config database detection logs ml main.py
+
+# Run dependency vulnerability audit (pip-audit)
+pip-audit -r requirements.txt
 ```
 
 ---

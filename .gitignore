@@ -1,22 +1,43 @@
+# Python environment & bytecode
 .venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
+# Test & lint caches
+.pytest_cache/
+.ruff_cache/
+
+# Databases
 database/*.db
 database/*.db-wal
 database/*.db-shm
 database/*.db*
-logs/alerts.json
-.pytest_cache/
 
+# Runtime alert logs
+logs/alerts.json
+logs/alerts.jsonl*
 *.log
+
+# Sensitive files & secrets
 .env
+.env.*
+*.env
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cert
+
+# Editor & IDE artifacts
 .vscode/
+.idea/
+*.swp
+*~
+*.bak
 
 # Local scratch artifacts
 Screenshot 2026-09-07 092417.png
 terminal 1 command.txt
-
-# Modern runtime alert logs
-logs/alerts.jsonl*
-

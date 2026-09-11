@@ -1,0 +1,16 @@
+# Bandit Security Analysis Configuration for SentinelX
+# Exclude test suites and virtual environments from security analysis
+exclude_dirs:
+  - "tests"
+  - ".venv"
+
+# Skipped checks with engineering justification:
+# - B104: Literal string "0.0.0.0" in packet_parser/rule_engine is a fallback IP parsing value, not a socket bind.
+# - B110: Try-except-pass blocks in ML predictor safely handle optional model probability estimations.
+# - B311: Standard random generator is used solely for synthetic dataset generation in ml/data/create_dataset.py.
+# - B608: SQL WHERE clause construction in backend/api.py uses parameterized '?' placeholders with strict parameter binding.
+skips:
+  - "B104"
+  - "B110"
+  - "B311"
+  - "B608"

@@ -1,0 +1,94 @@
+name: SentinelX CI & Quality Gates
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  code-quality:
+    name: Code Quality & Linting (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run Ruff checks
+        run: |
+          ruff check .
+
+  security-audit:
+    name: Security & Dependency Audit (Bandit & Pip-Audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies and security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run Bandit static application security testing
+        run: |
+          bandit -c bandit.yaml -r backend capture config database detection logs ml main.py
+
+      - name: Run Pip-audit dependency vulnerability scan
+        run: |
+          pip-audit -r requirements.txt
+
+  test-regression:
+    name: Automated Regression Suite (Pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run test suite
+        run: |
+          pytest -v
+
+  quality-gate:
+    name: Quality Gate Summary
+    needs: [code-quality, security-audit, test-regression]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quality Gate Status
+        run: |
+          echo "All SentinelX automated quality gates (linting, security, dependency audit, and test regression) completed successfully."

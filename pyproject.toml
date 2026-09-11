@@ -1,0 +1,33 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+exclude = [
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E4",   # Import syntax errors
+    "E7",   # Statement errors
+    "E9",   # Runtime syntax errors
+    "F",    # Pyflakes core analysis
+]
+ignore = [
+    "E501", # Line length (preserve existing functional layout)
+    "E402", # Module level import not at top of file
+    "F401", # Unused imports (preserve without rewriting working code)
+    "F841", # Unused local variables
+    "F541", # f-strings without placeholders
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
