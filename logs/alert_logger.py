@@ -1,11 +1,23 @@
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
 from database.database import insert_alert
 
 
-ALERT_FILE = Path(__file__).parent / "alerts.json"
+DEFAULT_ALERT_FILE = Path(__file__).parent / "alerts.json"
+
+
+def get_alert_file_path():
+    override = os.getenv("SENTINELX_ALERT_LOG")
+    if override:
+        return Path(override)
+    return DEFAULT_ALERT_FILE
+
+
+# Preserve ALERT_FILE for backwards compatibility
+ALERT_FILE = DEFAULT_ALERT_FILE
 
 
 def log_alert(alert):
@@ -14,18 +26,20 @@ def log_alert(alert):
         **alert
     }
 
+    alert_file = get_alert_file_path()
+    alert_file.parent.mkdir(parents=True, exist_ok=True)
     existing_alerts = []
 
-    if ALERT_FILE.exists():
+    if alert_file.exists():
         try:
-            with open(ALERT_FILE, "r", encoding="utf-8") as file:
+            with open(alert_file, "r", encoding="utf-8") as file:
                 existing_alerts = json.load(file)
         except (json.JSONDecodeError, OSError):
             existing_alerts = []
 
     existing_alerts.append(alert_record)
 
-    with open(ALERT_FILE, "w", encoding="utf-8") as file:
+    with open(alert_file, "w", encoding="utf-8") as file:
         json.dump(existing_alerts, file, indent=4)
 
     # Store the same alert in SQLite

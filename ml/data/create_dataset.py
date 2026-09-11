@@ -99,7 +99,7 @@ def create_dataset():
         Path(__file__).parent / "network_traffic.csv"
     )
 
-    dataset.to_csv(output_path, index=False)
+    dataset.to_csv(output_path, index=False, encoding="utf-8")
 
     print("[+] Dataset created successfully.")
     print(f"[+] Total samples: {len(dataset)}")

@@ -5,6 +5,7 @@ from config.settings import (
     PORT_SCAN_THRESHOLD,
     PORT_SCAN_TIME_WINDOW,
     PORT_SCAN_ALERT_COOLDOWN,
+    THREAT_TYPE_PORT_SCAN,
 )
 
 
@@ -67,7 +68,7 @@ def detect_port_scan(packet_data):
         last_scan_alert_time[source_ip] = current_time
 
         return {
-            "threat_type": "PORT_SCAN",
+            "threat_type": THREAT_TYPE_PORT_SCAN,
             "severity": "HIGH",
             "source_ip": source_ip,
             "destination_port_count": len(unique_ports),

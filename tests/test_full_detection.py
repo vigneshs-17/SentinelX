@@ -65,4 +65,11 @@ def test_full_detection_pipeline():
 
 
 if __name__ == "__main__":
-    test_full_detection_pipeline()
+    import os
+    import tempfile
+    from database.database import initialize_database
+    with tempfile.TemporaryDirectory() as temp_dir:
+        os.environ["SENTINELX_DB_PATH"] = os.path.join(temp_dir, "test.db")
+        os.environ["SENTINELX_ALERT_LOG"] = os.path.join(temp_dir, "test.json")
+        initialize_database()
+        test_full_detection_pipeline()

@@ -6,6 +6,7 @@ from config.settings import (
     HIGH_TRAFFIC_PACKET_THRESHOLD,
     HIGH_TRAFFIC_TIME_WINDOW,
     HIGH_TRAFFIC_RESET_THRESHOLD,
+    THREAT_TYPE_HIGH_TRAFFIC,
 )
 
 
@@ -78,7 +79,7 @@ def detect_high_traffic(packet_data):
         alert_active[source_ip] = True
 
         return {
-            "threat_type": "HIGH_TRAFFIC",
+            "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
             "severity": "HIGH",
             "source_ip": source_ip,
             "destination_ip": destination_ip,

@@ -1,4 +1,8 @@
-from logs.alert_logger import log_alert, ALERT_FILE
+import os
+import tempfile
+
+from database.database import initialize_database
+from logs.alert_logger import log_alert, get_alert_file_path
 
 
 def test_alert_logging():
@@ -23,10 +27,14 @@ def test_alert_logging():
     assert saved_alert["source_ip"] == "192.168.1.100"
 
     # Verify the JSON file exists
-    assert ALERT_FILE.exists()
+    assert get_alert_file_path().exists()
 
     print("Alert logging test passed!")
 
 
 if __name__ == "__main__":
-    test_alert_logging()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        os.environ["SENTINELX_DB_PATH"] = os.path.join(temp_dir, "test.db")
+        os.environ["SENTINELX_ALERT_LOG"] = os.path.join(temp_dir, "test.json")
+        initialize_database()
+        test_alert_logging()

@@ -33,7 +33,7 @@ def train_model():
 
     print("[*] Loading dataset...")
 
-    dataset = pd.read_csv(DATASET_PATH)
+    dataset = pd.read_csv(DATASET_PATH, encoding="utf-8")
 
     print(
         f"[+] Dataset loaded: "

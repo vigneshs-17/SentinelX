@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, send_from_directory
 from database.database import get_connection
 from pathlib import Path
+from config.settings import THREAT_TYPE_PORT_SCAN, THREAT_TYPE_HIGH_TRAFFIC
 
 
 app = Flask(__name__)
@@ -69,22 +70,20 @@ def get_stats():
     """)
     high_severity = cursor.fetchone()[0]
 
-    # Port scan alerts
-    # Includes both rule-based and ML-confirmed detections
+    # Port scan alerts (canonical PORT_SCAN detection events)
     cursor.execute("""
         SELECT COUNT(*)
         FROM alerts
-        WHERE threat_type IN ('PORT_SCAN', 'ML_PORT_SCAN')
-    """)
+        WHERE threat_type = ?
+    """, (THREAT_TYPE_PORT_SCAN,))
     port_scans = cursor.fetchone()[0]
 
-    # High traffic alerts
-    # Includes both rule-based and ML-confirmed detections
+    # High traffic alerts (canonical HIGH_TRAFFIC detection events)
     cursor.execute("""
         SELECT COUNT(*)
         FROM alerts
-        WHERE threat_type IN ('HIGH_TRAFFIC', 'ML_HIGH_TRAFFIC')
-    """)
+        WHERE threat_type = ?
+    """, (THREAT_TYPE_HIGH_TRAFFIC,))
     high_traffic = cursor.fetchone()[0]
 
     connection.close()

@@ -1,12 +1,29 @@
+import os
 import sqlite3
 from pathlib import Path
 
 
-DATABASE_FILE = Path(__file__).parent / "sentinelx.db"
+DEFAULT_DATABASE_FILE = Path(__file__).parent / "sentinelx.db"
 
 
-def get_connection():
-    return sqlite3.connect(DATABASE_FILE)
+def get_database_path():
+    override = os.getenv("SENTINELX_DB_PATH")
+    if override:
+        return Path(override)
+    return DEFAULT_DATABASE_FILE
+
+
+# Preserve DATABASE_FILE for backwards compatibility
+DATABASE_FILE = DEFAULT_DATABASE_FILE
+
+
+def get_connection(db_path=None):
+    target_path = Path(db_path) if db_path else get_database_path()
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(target_path, timeout=10.0)
+    connection.execute("PRAGMA journal_mode=WAL;")
+    connection.execute("PRAGMA synchronous=NORMAL;")
+    return connection
 
 
 def initialize_database():

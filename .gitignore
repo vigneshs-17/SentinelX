@@ -3,7 +3,11 @@ __pycache__/
 *.pyc
 
 database/*.db
+database/*.db-wal
+database/*.db-shm
+database/*.db*
 logs/alerts.json
+.pytest_cache/
 
 *.log
 .env

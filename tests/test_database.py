@@ -45,4 +45,8 @@ def test_database():
 
 
 if __name__ == "__main__":
-    test_database()
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
+        os.environ["SENTINELX_DB_PATH"] = os.path.join(temp_dir, "test.db")
+        test_database()

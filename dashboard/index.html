@@ -239,13 +239,13 @@ async function loadAlerts() {
 
         if (alerts.length === 0) {
 
-            table.innerHTML = `
-                <tr>
-                    <td colspan="7" class="empty">
-                        No security alerts detected.
-                    </td>
-                </tr>
-            `;
+            const emptyRow = document.createElement("tr");
+            const emptyCell = document.createElement("td");
+            emptyCell.colSpan = 7;
+            emptyCell.className = "empty";
+            emptyCell.textContent = "No security alerts detected.";
+            emptyRow.appendChild(emptyCell);
+            table.appendChild(emptyRow);
 
             return;
         }
@@ -254,15 +254,24 @@ async function loadAlerts() {
 
             const row = document.createElement("tr");
 
-            row.innerHTML = `
-                <td>${alert.id}</td>
-                <td>${alert.timestamp}</td>
-                <td>${alert.threat_type}</td>
-                <td class="high">${alert.severity}</td>
-                <td>${alert.source_ip || "N/A"}</td>
-                <td>${alert.protocol || "N/A"}</td>
-                <td>${alert.message}</td>
-            `;
+            const fields = [
+                { value: alert.id, className: "" },
+                { value: alert.timestamp, className: "" },
+                { value: alert.threat_type, className: "" },
+                { value: alert.severity, className: alert.severity === "HIGH" ? "high" : "" },
+                { value: alert.source_ip || "N/A", className: "" },
+                { value: alert.protocol || "N/A", className: "" },
+                { value: alert.message, className: "" }
+            ];
+
+            fields.forEach(field => {
+                const cell = document.createElement("td");
+                cell.textContent = field.value !== undefined && field.value !== null ? field.value : "";
+                if (field.className) {
+                    cell.className = field.className;
+                }
+                row.appendChild(cell);
+            });
 
             table.appendChild(row);
 
