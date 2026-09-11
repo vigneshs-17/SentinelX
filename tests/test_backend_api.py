@@ -61,6 +61,73 @@ class TestBackendApi:
         assert "insertAdjacentHTML" not in content
         assert "document.write" not in content
 
+    def test_dashboard_p1_investigation_and_interaction_features(self, client):
+        """Verify dashboard/index.html implements Phase 6B P1 features:
+        search, threat filters, severity filters, threat distribution bar,
+        detail inspection drawer with genuine API fields only, clipboard copy,
+        and strict XSS prevention."""
+        response = client.get("/")
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+
+        # 1. UI State Model
+        assert "UI_STATE" in content
+        assert "searchQuery" in content
+        assert "threatFilter" in content
+        assert "severityFilter" in content
+        assert "expandedAlertId" in content
+
+        # 2. Search input & clear button
+        assert "alert-search" in content
+        assert "search-clear-btn" in content
+        assert "Search by IP, message, threat, ID..." in content
+
+        # 3. Filter buttons (Threat & Severity)
+        assert 'data-threat="ALL"' in content
+        assert 'data-threat="PORT_SCAN"' in content
+        assert 'data-threat="HIGH_TRAFFIC"' in content
+        assert 'data-severity="ALL"' in content
+        assert 'data-severity="HIGH"' in content
+        assert 'data-severity="MEDIUM"' in content
+        assert 'data-severity="LOW"' in content
+
+        # 4. Result counter & empty state reset
+        assert "alerts-count-badge" in content
+        assert "filter-reset-btn" in content
+        assert "empty-state-row" in content
+
+        # 5. Cumulative Threat Distribution Bar
+        assert "threat-distribution-card" in content
+        assert "threat-distribution-bar" in content
+        assert "dist-bar-scans" in content
+        assert "dist-bar-traffic" in content
+        assert "dist-bar-empty" in content
+        assert "updateThreatDistribution" in content
+
+        # 6. Expandable Detail Inspection Drawer
+        assert "createAlertDetailRow" in content
+        assert "alert-detail-row" in content
+        assert "handleRowToggle" in content
+        assert "evidence-box" in content
+        assert "data-detail-for" in content
+
+        # 7. Clipboard Copy
+        assert "copyToClipboard" in content
+        assert "copy-btn" in content
+
+        # 8. Selection protection
+        assert "window.getSelection" in content
+
+        # 9. Strict rejection of fabricated/hallucinated fields (e.g. Unicast IPv4)
+        assert "Unicast IPv4" not in content, "Found banned 'Unicast IPv4' field in dashboard/index.html!"
+        assert "Vector: Unicast IPv4" not in content
+
+        # 10. Strict XSS prevention: verify zero innerHTML, insertAdjacentHTML, document.write, or eval
+        assert "innerHTML" not in content
+        assert "insertAdjacentHTML" not in content
+        assert "document.write" not in content
+        assert "eval(" not in content
+
     def test_security_headers_present_on_all_responses(self, client):
         """Verify defensive HTTP security headers are injected into all HTTP responses."""
         endpoints = ["/", "/health", "/api/alerts", "/api/stats"]
