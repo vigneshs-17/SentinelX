@@ -1,70 +1,63 @@
-from collections import defaultdict, deque
+import ipaddress
 import threading
 import time
-from typing import Optional, Dict
+from collections import defaultdict, deque
 
 from config.settings import (
-    HIGH_TRAFFIC_PACKET_THRESHOLD,
-    HIGH_TRAFFIC_PACKET_RATE_THRESHOLD,
-    HIGH_TRAFFIC_BYTE_RATE_THRESHOLD,
-    HIGH_TRAFFIC_TIME_WINDOW,
-    HIGH_TRAFFIC_RESET_THRESHOLD,
-    HIGH_TRAFFIC_ALERT_COOLDOWN,
-    THREAT_TYPE_HIGH_TRAFFIC,
     DETECTION_STATE_TTL,
+    HIGH_TRAFFIC_ALERT_COOLDOWN,
+    HIGH_TRAFFIC_BYTE_RATE_THRESHOLD,
+    HIGH_TRAFFIC_PACKET_RATE_THRESHOLD,
+    HIGH_TRAFFIC_PACKET_THRESHOLD,
+    HIGH_TRAFFIC_RESET_THRESHOLD,
+    HIGH_TRAFFIC_TIME_WINDOW,
+    THREAT_TYPE_HIGH_TRAFFIC,
 )
-
+from detection.scoring import calculate_confidence, calculate_severity
 
 # Concurrency lock protecting traffic history and sliding window state
 _traffic_lock = threading.Lock()
 
 # Backward-compatible tracking structures
-packet_tracker = defaultdict(list)
-alert_active = {}
+packet_tracker: defaultdict[str, list[float]] = defaultdict(list)
+alert_active: dict[str, bool] = {}
 
 # Sliding window rate tracking using deque for O(1) pruning
-_traffic_history: Dict[str, deque] = defaultdict(deque)
-_last_alert_time: Dict[str, float] = {}
+_traffic_history: dict[str, deque] = defaultdict(deque)
+_last_alert_time: dict[str, float] = {}
 
 
-def is_multicast_or_broadcast(ip_address: Optional[str]) -> bool:
+def is_multicast_or_broadcast(ip_address: str | None) -> bool:
     """
-    High-performance multicast and broadcast check using fast prefix/suffix
-    checks with IP address fallback.
+    Multicast and broadcast check using the ipaddress module.
+    Ignores only 255.255.255.255, unspecified addresses (0.0.0.0, ::),
+    and IPv4/IPv6 multicast (224.0.0.0/4, ff00::/8).
+    Does NOT ignore host addresses like 10.0.1.255.
     """
     if not ip_address:
         return False
 
-    # Fast string-based checks
-    if ip_address == "255.255.255.255" or ip_address.endswith(".255"):
+    try:
+        ip = ipaddress.ip_address(ip_address)
+    except ValueError:
+        return False
+
+    if ip.is_multicast or ip.is_unspecified:
         return True
 
-    # Check IPv4 multicast range: 224.0.0.0 through 239.255.255.255
-    first_octet_str = ip_address.split(".")[0] if "." in ip_address else ""
-    if first_octet_str.isdigit():
-        first_octet = int(first_octet_str)
-        if 224 <= first_octet <= 239:
-            return True
+    if ip_address == "255.255.255.255":
+        return True
 
     return False
 
 
-def _calculate_traffic_confidence(observed_rate: float, threshold_rate: float) -> float:
-    """Calculate transparent confidence score based on rate excess."""
-    if threshold_rate <= 0:
-        return 0.80
-    ratio = observed_rate / threshold_rate
-    score = 0.80 + min(0.18, max(0.0, (ratio - 1.0) * 0.10))
-    return round(score, 2)
-
-
-def detect_high_traffic(packet_data: dict) -> Optional[dict]:
+def detect_high_traffic(packet_data: dict) -> dict | None:
     """
     Rate-based volumetric anomaly detection:
-    
+
     Evaluates packet rate (pps) and byte rate (Bps) over a sliding time window.
     Filters out broadcast/multicast traffic and suppresses duplicate alerts.
-    
+
     Returns structured alert with rate metrics, evidence, and confidence score,
     or None if traffic is within normal operating thresholds.
     """
@@ -92,10 +85,7 @@ def detect_high_traffic(packet_data: dict) -> Optional[dict]:
         # Synchronize backward-compatible packet_tracker
         tracker = packet_tracker[source_ip]
         tracker.append(current_time)
-        packet_tracker[source_ip] = [
-            ts for ts in tracker
-            if ts >= cutoff
-        ]
+        packet_tracker[source_ip] = [ts for ts in tracker if ts >= cutoff]
         compat_packet_count = len(packet_tracker[source_ip])
 
         # Synchronize rate tracker deque (timestamp, byte_size)
@@ -132,10 +122,7 @@ def detect_high_traffic(packet_data: dict) -> Optional[dict]:
 
         # Cooldown & active suppression check
         last_alert = _last_alert_time.get(source_ip)
-        in_cooldown = (
-            last_alert is not None
-            and (current_time - last_alert < HIGH_TRAFFIC_ALERT_COOLDOWN)
-        )
+        in_cooldown = last_alert is not None and (current_time - last_alert < HIGH_TRAFFIC_ALERT_COOLDOWN)
 
         if alert_active.get(source_ip, False) or in_cooldown:
             return None
@@ -144,14 +131,17 @@ def detect_high_traffic(packet_data: dict) -> Optional[dict]:
         _last_alert_time[source_ip] = current_time
 
     # Payload generation outside critical section
-    confidence = _calculate_traffic_confidence(
-        max(packet_rate, packet_count / HIGH_TRAFFIC_TIME_WINDOW),
-        HIGH_TRAFFIC_PACKET_RATE_THRESHOLD,
-    )
+    ratios = [packet_count / HIGH_TRAFFIC_PACKET_THRESHOLD, packet_rate / HIGH_TRAFFIC_PACKET_RATE_THRESHOLD]
+    if byte_rate > 0:
+        ratios.append(byte_rate / HIGH_TRAFFIC_BYTE_RATE_THRESHOLD)
+    max_ratio = max(ratios)
+
+    severity = calculate_severity(max_ratio, 1.0)
+    confidence = calculate_confidence(max_ratio, 1.0)
 
     return {
         "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
-        "severity": "HIGH",
+        "severity": severity,
         "confidence": confidence,
         "source_ip": source_ip,
         "destination_ip": destination_ip,
@@ -175,16 +165,13 @@ def detect_high_traffic(packet_data: dict) -> Optional[dict]:
     }
 
 
-def cleanup_traffic_state(now: Optional[float] = None, ttl: float = DETECTION_STATE_TTL) -> int:
+def cleanup_traffic_state(now: float | None = None, ttl: float = DETECTION_STATE_TTL) -> int:
     """Clean up expired traffic tracking entries to enforce bounded memory."""
     current_time = now if now is not None else time.time()
     cutoff = current_time - ttl
 
     with _traffic_lock:
-        expired_ips = [
-            ip for ip, history in list(_traffic_history.items())
-            if not history or history[-1][0] < cutoff
-        ]
+        expired_ips = [ip for ip, history in list(_traffic_history.items()) if not history or history[-1][0] < cutoff]
 
         for ip in expired_ips:
             _traffic_history.pop(ip, None)

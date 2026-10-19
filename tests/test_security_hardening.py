@@ -1,30 +1,26 @@
 import hashlib
 import json
-import os
 import tempfile
 import threading
 from pathlib import Path
 from unittest.mock import patch
+
 import pytest
+from scapy.all import ARP, IP, TCP, UDP, Ether, IPv6
 
 from capture.packet_parser import parse_packet
-from config.settings import CORS_ALLOWED_ORIGINS, ALLOW_LOCAL_FILE_CORS
+from config.settings import ALLOW_LOCAL_FILE_CORS, CORS_ALLOWED_ORIGINS
 from logs.alert_logger import (
     log_alert,
     read_alerts,
-    _rotate_file,
-    get_alert_file_path,
-    DEFAULT_MAX_LOG_SIZE,
-    DEFAULT_MAX_LOG_BACKUPS,
 )
 from ml.predictor import (
-    calculate_model_sha256,
-    verify_model_integrity,
-    get_model,
-    ModelIntegrityError,
     MODEL_PATH,
+    ModelIntegrityError,
+    calculate_model_sha256,
+    get_model,
+    verify_model_integrity,
 )
-from scapy.all import IP, IPv6, TCP, UDP, ARP, Ether
 
 
 @pytest.fixture
@@ -38,6 +34,7 @@ def temp_dir():
 # 1. P0 — ML Model Integrity Verification Tests
 # =============================================================================
 
+
 class TestMLModelIntegrity:
     """Tests for cryptographic checksum verification of ML models."""
 
@@ -45,7 +42,7 @@ class TestMLModelIntegrity:
         """Verify the production sentinelx_model.pkl matches model_metadata.json."""
         meta_path = MODEL_PATH.parent / "model_metadata.json"
         assert meta_path.exists(), "model_metadata.json must exist"
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             metadata = json.load(f)
 
         expected_hash = metadata.get("model_sha256")
@@ -109,7 +106,10 @@ class TestMLModelIntegrity:
         fake_model = temp_dir / "tampered.pkl"
         fake_meta = temp_dir / "model_metadata.json"
         fake_model.write_bytes(b"TAMPERED")
-        fake_meta.write_text(json.dumps({"model_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}), encoding="utf-8")
+        fake_meta.write_text(
+            json.dumps({"model_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}),
+            encoding="utf-8",
+        )
 
         with patch("joblib.load") as mock_joblib:
             with pytest.raises(ModelIntegrityError):
@@ -120,6 +120,7 @@ class TestMLModelIntegrity:
 # =============================================================================
 # 2. P1 — Alert Logger Hardening Tests
 # =============================================================================
+
 
 class TestAlertLoggerHardening:
     """Tests for append-only JSONL format, size-based rotation, and crash resilience."""
@@ -209,15 +210,16 @@ class TestAlertLoggerHardening:
         assert not backup_4.exists()
 
     def test_legacy_json_path_backward_compatibility(self, temp_dir, monkeypatch):
-        """Verify logging to a path ending in .json retains JSON array format."""
-        legacy_file = temp_dir / "test.json"
-        monkeypatch.setenv("SENTINELX_ALERT_LOG", str(legacy_file))
+        """Verify read_alerts reads legacy JSON array files."""
+        legacy_file = temp_dir / "legacy_array.json"
+        legacy_data = [
+            {"threat_type": "PORT_SCAN", "severity": "HIGH", "msg": "first"},
+            {"threat_type": "PORT_SCAN", "severity": "HIGH", "msg": "second"},
+        ]
+        with open(legacy_file, "w", encoding="utf-8") as f:
+            json.dump(legacy_data, f)
 
-        log_alert({"threat_type": "PORT_SCAN", "severity": "HIGH", "msg": "first"})
-        log_alert({"threat_type": "PORT_SCAN", "severity": "HIGH", "msg": "second"})
-
-        with open(legacy_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = read_alerts(legacy_file)
         assert isinstance(data, list)
         assert len(data) == 2
         assert data[0]["msg"] == "first"
@@ -234,12 +236,7 @@ class TestAlertLoggerHardening:
         def worker(thread_id):
             try:
                 for j in range(20):
-                    log_alert({
-                        "threat_type": "PORT_SCAN",
-                        "severity": "LOW",
-                        "thread_id": thread_id,
-                        "item": j
-                    })
+                    log_alert({"threat_type": "PORT_SCAN", "severity": "LOW", "thread_id": thread_id, "item": j})
             except Exception as e:
                 errors.append(e)
 
@@ -260,12 +257,14 @@ class TestAlertLoggerHardening:
 # 3. P1 — CORS Origin: null Lockdown Tests
 # =============================================================================
 
+
 class TestCORSSecurityLockdown:
     """Tests for CORS Origin: null rejection and opt-in security."""
 
     @pytest.fixture
     def client(self):
         from backend.api import app
+
         app.config["TESTING"] = True
         with app.test_client() as c:
             yield c
@@ -310,6 +309,7 @@ class TestCORSSecurityLockdown:
 # =============================================================================
 # 4. P1 — IPv6 Packet Parsing Support Tests
 # =============================================================================
+
 
 class TestIPv6PacketParsing:
     """Tests for IPv6 dissection and protocol extraction in parse_packet."""

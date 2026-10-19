@@ -1,7 +1,7 @@
 import random
-import pandas as pd
 from pathlib import Path
 
+import pandas as pd
 
 random.seed(42)
 
@@ -13,18 +13,9 @@ def generate_normal_samples(count=1000):
         protocol = random.choice([1, 2])
         packet_size = random.randint(40, 1500)
         source_port = random.randint(1024, 65535)
-        destination_port = random.choice(
-            [53, 80, 443, 22, 123]
-        )
+        destination_port = random.choice([53, 80, 443, 22, 123])
 
-        samples.append([
-            packet_size,
-            source_port,
-            destination_port,
-            protocol,
-            0,
-            "NORMAL"
-        ])
+        samples.append([packet_size, source_port, destination_port, protocol, 0, "NORMAL"])
 
     return samples
 
@@ -39,14 +30,7 @@ def generate_port_scan_samples(count=500):
         protocol = 1
         tcp_syn = 1
 
-        samples.append([
-            packet_size,
-            source_port,
-            destination_port,
-            protocol,
-            tcp_syn,
-            "PORT_SCAN"
-        ])
+        samples.append([packet_size, source_port, destination_port, protocol, tcp_syn, "PORT_SCAN"])
 
     return samples
 
@@ -58,18 +42,9 @@ def generate_high_traffic_samples(count=500):
         protocol = random.choice([1, 2])
         packet_size = random.randint(500, 1500)
         source_port = random.randint(1024, 65535)
-        destination_port = random.choice(
-            [53, 80, 443]
-        )
+        destination_port = random.choice([53, 80, 443])
 
-        samples.append([
-            packet_size,
-            source_port,
-            destination_port,
-            protocol,
-            0,
-            "HIGH_TRAFFIC"
-        ])
+        samples.append([packet_size, source_port, destination_port, protocol, 0, "HIGH_TRAFFIC"])
 
     return samples
 
@@ -81,23 +56,11 @@ def create_dataset():
 
     all_samples = normal + port_scan + high_traffic
 
-    columns = [
-        "packet_size",
-        "source_port",
-        "destination_port",
-        "protocol",
-        "tcp_syn",
-        "label"
-    ]
+    columns = ["packet_size", "source_port", "destination_port", "protocol", "tcp_syn", "label"]
 
-    dataset = pd.DataFrame(
-        all_samples,
-        columns=columns
-    )
+    dataset = pd.DataFrame(all_samples, columns=columns)
 
-    output_path = (
-        Path(__file__).parent / "network_traffic.csv"
-    )
+    output_path = Path(__file__).parent / "network_traffic.csv"
 
     dataset.to_csv(output_path, index=False, encoding="utf-8")
 

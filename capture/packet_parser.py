@@ -1,4 +1,4 @@
-from scapy.all import IP, IPv6, TCP, UDP
+from scapy.all import IP, TCP, UDP, IPv6
 
 
 def parse_packet(packet):

@@ -8,10 +8,8 @@ Operates exclusively on raw file bytes.
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import sys
-from typing import Optional, Tuple
-
+from pathlib import Path
 
 SECURITY_WARNING = (
     "[SECURITY NOTICE] Cryptographic SHA256 checksums verify binary file identity\n"
@@ -37,7 +35,7 @@ def calculate_file_sha256(path: Path) -> str:
 def inspect_model_checksum(
     model_path: Path,
     metadata_path: Path,
-) -> Tuple[str, Optional[str], bool]:
+) -> tuple[str, str | None, bool]:
     """
     Safely inspects the target model file and compares against metadata.
     Returns: (actual_file_hash, metadata_hash_or_none, is_match)
@@ -47,7 +45,7 @@ def inspect_model_checksum(
     expected_hash = None
     if metadata_path.exists():
         try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
+            with open(metadata_path, encoding="utf-8") as f:
                 meta = json.load(f)
             expected_hash = meta.get("model_sha256")
             if expected_hash:
@@ -80,7 +78,7 @@ def update_model_checksum(
         backup_path.write_bytes(metadata_path.read_bytes())
 
         try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
+            with open(metadata_path, encoding="utf-8") as f:
                 existing_meta = json.load(f)
         except Exception:
             existing_meta = {}

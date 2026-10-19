@@ -1,16 +1,20 @@
 import hashlib
 import json
+import logging
+import threading
+from pathlib import Path
+
 import joblib
 import pandas as pd
-from pathlib import Path
-import threading
-from typing import Tuple, Optional, Any
 
 from ml.feature_extractor import extract_features
+
+logger = logging.getLogger("sentinelx.ml.predictor")
 
 
 class ModelIntegrityError(ValueError):
     """Raised when machine learning model cryptographic checksum verification fails."""
+
     pass
 
 
@@ -18,11 +22,7 @@ class ModelIntegrityError(ValueError):
 # Model path
 # ---------------------------------------------------------
 
-MODEL_PATH = (
-    Path(__file__).resolve().parent
-    / "models"
-    / "sentinelx_model.pkl"
-)
+MODEL_PATH = Path(__file__).resolve().parent / "models" / "sentinelx_model.pkl"
 
 # Feature columns matching training schema
 FEATURE_COLUMNS = [
@@ -57,7 +57,7 @@ def calculate_model_sha256(path: Path) -> str:
     return sha256_hash.hexdigest()
 
 
-def verify_model_integrity(model_path: Path, metadata_path: Optional[Path] = None) -> str:
+def verify_model_integrity(model_path: Path, metadata_path: Path | None = None) -> str:
     """
     Verifies that model_path matches the cryptographic SHA256 recorded in metadata.
     Raises ModelIntegrityError if metadata is missing, malformed, or checksum mismatches.
@@ -68,7 +68,7 @@ def verify_model_integrity(model_path: Path, metadata_path: Optional[Path] = Non
         raise ModelIntegrityError(f"Model metadata file missing: {meta_file}")
 
     try:
-        with open(meta_file, "r", encoding="utf-8") as f:
+        with open(meta_file, encoding="utf-8") as f:
             metadata = json.load(f)
     except Exception as err:
         raise ModelIntegrityError(f"Malformed model metadata JSON in {meta_file}: {err}") from err
@@ -88,7 +88,7 @@ def verify_model_integrity(model_path: Path, metadata_path: Optional[Path] = Non
     return expected_sha256.lower()
 
 
-def get_model(custom_path: Optional[Path] = None, metadata_path: Optional[Path] = None):
+def get_model(custom_path: Path | None = None, metadata_path: Path | None = None):
     """Safely verifies SHA256 checksum and returns the loaded ML model, with deterministic caching."""
     global _cached_model
     with _model_lock:
@@ -115,6 +115,7 @@ except Exception:
 # Threat prediction
 # ---------------------------------------------------------
 
+
 def predict_threat(packet_data: dict) -> str:
     """
     Predicts threat category ('NORMAL', 'PORT_SCAN', 'HIGH_TRAFFIC')
@@ -124,20 +125,17 @@ def predict_threat(packet_data: dict) -> str:
     return prediction
 
 
-def predict_threat_with_confidence(packet_data: dict) -> Tuple[str, float]:
+def predict_threat_with_confidence(packet_data: dict) -> tuple[str, float]:
     """
     Predicts threat category along with statistical confidence (probability)
     derived from the Random Forest ensemble votes.
-    
+
     Returns: (predicted_label: str, confidence_score: float)
     """
     active_model = get_model()
     features = extract_features(packet_data)
 
-    feature_values = {
-        column: features.get(column, 0)
-        for column in FEATURE_COLUMNS
-    }
+    feature_values = {column: features.get(column, 0) for column in FEATURE_COLUMNS}
 
     input_data = pd.DataFrame(
         [feature_values],
@@ -156,8 +154,8 @@ def predict_threat_with_confidence(packet_data: dict) -> Tuple[str, float]:
             if prediction in classes:
                 class_idx = classes.index(prediction)
                 confidence = float(probabilities[class_idx])
-        except Exception:
-            pass
+        except (AttributeError, ValueError, IndexError) as exc:
+            logger.debug("Confidence estimation fallback triggered: %s", exc)
 
     return str(prediction), round(confidence, 4)
 

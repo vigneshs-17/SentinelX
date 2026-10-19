@@ -1,8 +1,8 @@
 import re
-from pathlib import Path
+
 import pytest
 
-from backend.api import app, DASHBOARD_DIR
+from backend.api import DASHBOARD_DIR, app
 
 
 @pytest.fixture
@@ -70,9 +70,7 @@ class TestPhase7BCSPAndPermissionsPolicy:
 
         # Must have a <meta http-equiv="Content-Security-Policy" ...> tag
         meta_match = re.search(
-            r'<meta\s+http-equiv=["\']Content-Security-Policy["\']\s+content="([^"]+)"',
-            content,
-            re.IGNORECASE
+            r'<meta\s+http-equiv=["\']Content-Security-Policy["\']\s+content="([^"]+)"', content, re.IGNORECASE
         )
         assert meta_match is not None, "Missing <meta http-equiv='Content-Security-Policy'> in dashboard/index.html"
         meta_csp = meta_match.group(1)
@@ -96,9 +94,7 @@ class TestPhase7BCSPAndPermissionsPolicy:
 
         # No http:// or https:// external links in src/href
         external_refs = re.findall(
-            r'<(?:link|script|img|iframe)\b[^>]*\b(?:src|href)=[\'"](https?://[^\'"]*)[\'"]',
-            content,
-            re.IGNORECASE
+            r'<(?:link|script|img|iframe)\b[^>]*\b(?:src|href)=[\'"](https?://[^\'"]*)[\'"]', content, re.IGNORECASE
         )
         assert len(external_refs) == 0, f"Found unexpected external resources: {external_refs}"
 
@@ -119,7 +115,7 @@ class TestPhase7BCSPAndPermissionsPolicy:
 
         assert "navigator.clipboard.writeText" in content, "Missing navigator.clipboard.writeText in dashboard"
         assert "fallbackCopy" in content, "Missing fallbackCopy helper in dashboard"
-        assert "document.execCommand(\"copy\")" in content or "document.execCommand('copy')" in content
+        assert 'document.execCommand("copy")' in content or "document.execCommand('copy')" in content
 
     def test_cors_behavior_preserved_with_csp(self, client, monkeypatch):
         """Verify CORS rules operate normally alongside the new CSP and Permissions-Policy headers."""

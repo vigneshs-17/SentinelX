@@ -1,16 +1,21 @@
+"""
+Persistent alert logger for SentinelX.
+
+Appends alert records to an append-only JSON Lines (.jsonl) file with size-based
+rotation, and forwards alerts to SQLite persistence. All timestamps are timezone-aware UTC.
+"""
+
 import json
+import logging
 import os
-from pathlib import Path
 import threading
-from datetime import datetime
-from typing import Optional, List, Dict, Any
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from database.database import insert_alert
 
-
-DEFAULT_JSONL_LOG = Path(__file__).parent / "alerts.jsonl"
-DEFAULT_ALERT_FILE = DEFAULT_JSONL_LOG
-ALERT_FILE = DEFAULT_ALERT_FILE
+logger = logging.getLogger("sentinelx.logger")
 
 DEFAULT_MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
 DEFAULT_MAX_LOG_BACKUPS = 5
@@ -19,13 +24,19 @@ _alert_log_lock = threading.Lock()
 
 
 def get_alert_file_path() -> Path:
+    """Returns the configured JSONL alert file path."""
     override = os.getenv("SENTINELX_ALERT_LOG")
     if override:
         return Path(override)
-    return DEFAULT_ALERT_FILE
+    data_dir = Path(os.getenv("SENTINELX_DATA_DIR", "data"))
+    return data_dir / "alerts.jsonl"
 
 
-def _rotate_file(file_path: Path, max_backups: int = DEFAULT_MAX_LOG_BACKUPS):
+# Preserve ALERT_FILE for backwards compatibility
+ALERT_FILE = get_alert_file_path()
+
+
+def _rotate_file(file_path: Path, max_backups: int = DEFAULT_MAX_LOG_BACKUPS) -> None:
     """
     Performs log file rotation when current file size reaches limit.
     Rotates:
@@ -74,15 +85,21 @@ def _rotate_file(file_path: Path, max_backups: int = DEFAULT_MAX_LOG_BACKUPS):
             pass
 
 
-def log_alert(alert: dict) -> dict:
+def log_alert(alert: dict[str, Any]) -> dict[str, Any]:
     """
-    Logs an alert record to persistent storage and SQLite.
-    Supports append-only JSONL format with size-based rotation,
-    while maintaining backward compatibility for files explicitly ending in .json.
+    Logs an alert record to append-only JSONL storage and SQLite.
+    Timestamps are formatted as ISO-8601 UTC with explicit offset (+00:00).
     """
+    # Note: In Phase 2, detected_at is recorded as processing time (ISO-8601 UTC with offset).
+    # Phase 3 switches this to packet event time.
+    now_utc = datetime.now(UTC).isoformat(timespec="seconds")
+    detected_at = alert.get("detected_at") or now_utc
+    timestamp = alert.get("timestamp") or detected_at
+
     alert_record = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        **alert
+        **alert,
+        "detected_at": detected_at,
+        "timestamp": timestamp,
     }
 
     alert_file = get_alert_file_path()
@@ -92,54 +109,37 @@ def log_alert(alert: dict) -> dict:
     max_backups = int(os.getenv("SENTINELX_MAX_LOG_BACKUPS", str(DEFAULT_MAX_LOG_BACKUPS)))
 
     with _alert_log_lock:
-        if alert_file.suffix == ".json":
-            # Backward compatibility: legacy JSON array format
-            existing_alerts = []
-            if alert_file.exists():
-                try:
-                    with open(alert_file, "r", encoding="utf-8") as file:
-                        existing_alerts = json.load(file)
-                except (json.JSONDecodeError, OSError):
-                    existing_alerts = []
+        if alert_file.exists() and alert_file.stat().st_size >= max_size:
+            _rotate_file(alert_file, max_backups)
 
-            existing_alerts.append(alert_record)
+        line = json.dumps(alert_record, ensure_ascii=False) + "\n"
+        with open(alert_file, "a", encoding="utf-8") as file:
+            file.write(line)
+            file.flush()
 
-            with open(alert_file, "w", encoding="utf-8") as file:
-                json.dump(existing_alerts, file, indent=4)
-        else:
-            # Modern P1 Hardening: Append-only JSON Lines with rotation
-            if alert_file.exists() and alert_file.stat().st_size >= max_size:
-                _rotate_file(alert_file, max_backups)
-
-            line = json.dumps(alert_record, ensure_ascii=False) + "\n"
-            with open(alert_file, "a", encoding="utf-8") as file:
-                file.write(line)
-                file.flush()
-
-        # Store the same alert in SQLite
+        # Store in SQLite database
         insert_alert(alert_record)
 
     return alert_record
 
 
-def read_alerts(file_path: Optional[Path] = None) -> List[Dict[str, Any]]:
+def read_alerts(file_path: Path | None = None) -> list[dict[str, Any]]:
     """
     Reads alerts from file storage.
-    Supports both append-only JSONL (.jsonl) and legacy JSON array (.json) formats.
-    Resilient against corrupted or malformed lines.
+    Supports append-only JSONL format and legacy files with corrupted line resilience.
     """
     target = Path(file_path) if file_path else get_alert_file_path()
     if not target.exists():
         return []
 
-    alerts: List[Dict[str, Any]] = []
+    alerts: list[dict[str, Any]] = []
     try:
-        with open(target, "r", encoding="utf-8") as f:
+        with open(target, encoding="utf-8") as f:
             content = f.read().strip()
             if not content:
                 return []
 
-            # Check if content is a legacy JSON array
+            # Check if content starts with legacy JSON array
             if content.startswith("["):
                 try:
                     parsed = json.loads(content)
@@ -167,5 +167,4 @@ def read_alerts(file_path: Optional[Path] = None) -> List[Dict[str, Any]]:
 
 
 if __name__ == "__main__":
-    print("SentinelX Alert Logger")
-    print("Alert logging module loaded successfully.")
+    logger.info("SentinelX Alert Logger loaded successfully.")

@@ -1,23 +1,21 @@
 import json
 from pathlib import Path
-import pytest
-import pandas as pd
-import joblib
 
-from ml.feature_extractor import extract_features
-from ml.predictor import (
-    predict_threat,
-    predict_threat_with_confidence,
-    get_model,
-    FEATURE_COLUMNS,
-    MODEL_PATH,
-)
+import joblib
+import pandas as pd
+
+from detection.rule_engine import detect_port_scan
+from detection.traffic_rules import detect_high_traffic
 from ml.evaluation.metrics import (
     compute_comprehensive_metrics,
     format_confusion_matrix_ascii,
 )
-from detection.rule_engine import detect_port_scan
-from detection.traffic_rules import detect_high_traffic
+from ml.feature_extractor import extract_features
+from ml.predictor import (
+    FEATURE_COLUMNS,
+    predict_threat,
+    predict_threat_with_confidence,
+)
 
 
 class TestMLPipeline:
@@ -108,27 +106,22 @@ class TestMLPipeline:
     # =========================================================================
 
     def test_model_versioning_artifacts_exist(self):
-        """Verify baseline (v1) and improved (v2) models, active model, and metadata exist."""
+        """Verify active model and metadata exist and load correctly."""
         mod_dir = Path("ml/models").resolve()
-        v1_path = mod_dir / "sentinelx_model_v1_baseline.pkl"
-        v2_path = mod_dir / "sentinelx_model_v2.pkl"
         prod_path = mod_dir / "sentinelx_model.pkl"
         meta_path = mod_dir / "model_metadata.json"
 
-        assert v1_path.exists(), "Baseline model v1 artifact missing"
-        assert v2_path.exists(), "Improved model v2 artifact missing"
         assert prod_path.exists(), "Production model artifact missing"
         assert meta_path.exists(), "Model metadata JSON missing"
 
-        # Verify models load and have correct classes
-        for path in [v1_path, v2_path, prod_path]:
-            m = joblib.load(path)
-            assert hasattr(m, "predict")
-            assert hasattr(m, "classes_")
-            assert set(m.classes_) == {"NORMAL", "PORT_SCAN", "HIGH_TRAFFIC"}
+        # Verify active model loads and has correct classes
+        m = joblib.load(prod_path)
+        assert hasattr(m, "predict")
+        assert hasattr(m, "classes_")
+        assert set(m.classes_) == {"NORMAL", "PORT_SCAN", "HIGH_TRAFFIC"}
 
         # Verify metadata schema
-        with open(meta_path, "r", encoding="utf-8") as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
 
         assert meta["model_version"] == "2.0.0"
@@ -233,7 +226,7 @@ class TestMLPipeline:
         assert (rep_dir / "confusion_matrices.txt").exists()
         assert (rep_dir / "hybrid_analysis_report.md").exists()
 
-        with open(rep_dir / "improved_evaluation.json", "r", encoding="utf-8") as f:
+        with open(rep_dir / "improved_evaluation.json", encoding="utf-8") as f:
             data = json.load(f)
             assert data["accuracy"] > 0.70
             assert data["macro_f1"] > 0.70

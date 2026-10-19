@@ -1,24 +1,26 @@
-import json
-from pathlib import Path
-from typing import Dict, List, Optional, Any
+import logging
+from typing import Any
+
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
+    confusion_matrix,
+    f1_score,
     precision_score,
     recall_score,
-    f1_score,
-    confusion_matrix,
     roc_auc_score,
 )
 from sklearn.preprocessing import label_binarize
 
+logger = logging.getLogger("sentinelx.ml.metrics")
+
 
 def compute_comprehensive_metrics(
-    y_true: List[str],
-    y_pred: List[str],
-    y_prob: Optional[np.ndarray] = None,
-    classes: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    y_true: list[str],
+    y_pred: list[str],
+    y_prob: np.ndarray | None = None,
+    classes: list[str] | None = None,
+) -> dict[str, Any]:
     """
     Computes a complete, scientifically defensible evaluation metric suite
     for multi-class threat classification.
@@ -85,7 +87,7 @@ def compute_comprehensive_metrics(
     # ROC-AUC if probability outputs are available
     roc_auc_ovr = None
     roc_auc_ovo = None
-    per_class_roc_auc = {}
+    per_class_roc_auc: dict[str, float | None] = {}
 
     if y_prob is not None:
         try:
@@ -96,10 +98,11 @@ def compute_comprehensive_metrics(
             for idx, c in enumerate(classes):
                 try:
                     per_class_roc_auc[c] = round(float(roc_auc_score(y_bin[:, idx], y_prob[:, idx])), 4)
-                except Exception:
+                except (ValueError, IndexError, TypeError) as exc:
+                    logger.debug("Per-class ROC-AUC unavailable for %s: %s", c, exc)
                     per_class_roc_auc[c] = None
-        except Exception:
-            pass
+        except (ValueError, IndexError, TypeError) as exc:
+            logger.debug("Multi-class ROC-AUC calculation failed: %s", exc)
 
     return {
         "n_samples": n_samples,
@@ -121,7 +124,7 @@ def compute_comprehensive_metrics(
     }
 
 
-def format_confusion_matrix_ascii(cm: List[List[int]], classes: List[str]) -> str:
+def format_confusion_matrix_ascii(cm: list[list[int]], classes: list[str]) -> str:
     """Formats a confusion matrix as a clear text table."""
     col_width = max(len(c) for c in classes) + 4
     header = f"{'Actual \\ Predicted':<{col_width}}" + "".join(f"{c:>{col_width}}" for c in classes)
@@ -135,7 +138,7 @@ def format_confusion_matrix_ascii(cm: List[List[int]], classes: List[str]) -> st
     return "\n".join(rows)
 
 
-def format_metrics_markdown_table(metrics: Dict[str, Any], title: str = "Evaluation Metrics") -> str:
+def format_metrics_markdown_table(metrics: dict[str, Any], title: str = "Evaluation Metrics") -> str:
     """Generates a clean markdown table summarizing metrics."""
     lines = [
         f"### {title}",
@@ -143,7 +146,7 @@ def format_metrics_markdown_table(metrics: Dict[str, Any], title: str = "Evaluat
         "| Metric | Value |",
         "| :--- | :--- |",
         f"| **Samples Evaluated** | {metrics['n_samples']} |",
-        f"| **Accuracy** | {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%) |",
+        f"| **Accuracy** | {metrics['accuracy']:.4f} ({metrics['accuracy'] * 100:.2f}%) |",
         f"| **Macro F1-Score** | {metrics['macro_f1']:.4f} |",
         f"| **Weighted F1-Score** | {metrics['weighted_f1']:.4f} |",
         f"| **Macro Precision** | {metrics['macro_precision']:.4f} |",
@@ -156,13 +159,15 @@ def format_metrics_markdown_table(metrics: Dict[str, Any], title: str = "Evaluat
         lines.append(f"| **ROC-AUC (OvR)** | {metrics['roc_auc_ovr']:.4f} |")
         lines.append(f"| **ROC-AUC (OvO)** | {metrics['roc_auc_ovo']:.4f} |")
 
-    lines.extend([
-        "",
-        "#### Per-Class Performance",
-        "",
-        "| Class | Support | TP | FP | FN | TN | Precision | Recall | F1-Score | FPR | FNR |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
-    ])
+    lines.extend(
+        [
+            "",
+            "#### Per-Class Performance",
+            "",
+            "| Class | Support | TP | FP | FN | TN | Precision | Recall | F1-Score | FPR | FNR |",
+            "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+        ]
+    )
 
     for c in metrics["classes"]:
         p = metrics["per_class"][c]

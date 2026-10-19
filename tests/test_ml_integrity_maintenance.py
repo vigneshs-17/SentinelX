@@ -1,29 +1,26 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
+
 import pytest
 
+from ml.evaluation.train_model import (
+    FEATURE_COLUMNS,
+    ModelActivationError,
+    train_and_evaluate_improved_model,
+)
 from ml.manage_model_hash import (
     calculate_file_sha256,
     inspect_model_checksum,
     update_model_checksum,
 )
 from ml.predictor import (
-    verify_model_integrity,
-    get_model,
     calculate_model_sha256,
     invalidate_model_cache,
-    _model_lock,
-    ModelIntegrityError,
-    MODEL_PATH,
-)
-from ml.evaluation.train_model import (
-    train_and_evaluate_improved_model,
-    ModelActivationError,
-    FEATURE_COLUMNS,
+    verify_model_integrity,
 )
 
 
@@ -102,7 +99,7 @@ class TestModelChecksumToolingSafety:
             "model_type": "RandomForestClassifier",
             "model_sha256": "OLD_HASH_123",
             "classes": ["NORMAL", "PORT_SCAN"],
-            "custom_note": "Production deployment note"
+            "custom_note": "Production deployment note",
         }
         meta_file.write_text(json.dumps(original_metadata, indent=2), encoding="utf-8")
 
@@ -113,12 +110,12 @@ class TestModelChecksumToolingSafety:
         # Verify backup exists and contains original hash
         backup_file = temp_dir / "model_metadata.json.bak"
         assert backup_file.exists()
-        with open(backup_file, "r", encoding="utf-8") as f:
+        with open(backup_file, encoding="utf-8") as f:
             backup_data = json.load(f)
         assert backup_data["model_sha256"] == "OLD_HASH_123"
 
         # Verify new metadata file contains updated hash and all preserved fields
-        with open(meta_file, "r", encoding="utf-8") as f:
+        with open(meta_file, encoding="utf-8") as f:
             new_data = json.load(f)
         assert new_data["model_sha256"] == expected_hash
         assert new_data["model_version"] == "2.0.0"
@@ -136,23 +133,53 @@ class TestTrainingPipelineAutomatedChecksum:
         rows = []
         # Add 30 samples (10 per class) to allow StratifiedKFold cv=2
         for i in range(10):
-            rows.append({"packet_size": 60, "source_port": 1000 + i, "destination_port": 80, "protocol": 6, "tcp_syn": 1, "label": "PORT_SCAN"})
-            rows.append({"packet_size": 1500, "source_port": 5000 + i, "destination_port": 443, "protocol": 17, "tcp_syn": 0, "label": "HIGH_TRAFFIC"})
-            rows.append({"packet_size": 250, "source_port": 8000 + i, "destination_port": 53, "protocol": 17, "tcp_syn": 0, "label": "NORMAL"})
+            rows.append(
+                {
+                    "packet_size": 60,
+                    "source_port": 1000 + i,
+                    "destination_port": 80,
+                    "protocol": 6,
+                    "tcp_syn": 1,
+                    "label": "PORT_SCAN",
+                }
+            )
+            rows.append(
+                {
+                    "packet_size": 1500,
+                    "source_port": 5000 + i,
+                    "destination_port": 443,
+                    "protocol": 17,
+                    "tcp_syn": 0,
+                    "label": "HIGH_TRAFFIC",
+                }
+            )
+            rows.append(
+                {
+                    "packet_size": 250,
+                    "source_port": 8000 + i,
+                    "destination_port": 53,
+                    "protocol": 17,
+                    "tcp_syn": 0,
+                    "label": "NORMAL",
+                }
+            )
 
         import pandas as pd
+
         pd.DataFrame(rows).to_csv(data_path, index=False)
 
         mod_dir = temp_dir / "models"
         rep_dir = temp_dir / "reports"
 
-        # Run training pipeline with cv_folds=2 on mini dataset
-        metrics = train_and_evaluate_improved_model(
+        # Run training pipeline with cv_folds=2 on mini dataset with fast grid
+        fast_grid = {"n_estimators": [5], "max_depth": [3]}
+        train_and_evaluate_improved_model(
             dataset_path=str(data_path),
             models_dir=str(mod_dir),
             reports_dir=str(rep_dir),
             random_state=42,
             cv_folds=2,
+            param_grid=fast_grid,
         )
 
         prod_model = mod_dir / "sentinelx_model.pkl"
@@ -162,7 +189,7 @@ class TestTrainingPipelineAutomatedChecksum:
         assert meta_file.exists(), "Metadata file must exist"
 
         # 1. Verify model_sha256 is in metadata
-        with open(meta_file, "r", encoding="utf-8") as f:
+        with open(meta_file, encoding="utf-8") as f:
             metadata = json.load(f)
 
         assert "model_sha256" in metadata, "model_sha256 missing from model_metadata.json"
@@ -201,14 +228,14 @@ class TestTrainingPipelineAutomatedChecksum:
         meta_file.write_text(json.dumps(original_content), encoding="utf-8")
 
         # Call with non-existent dataset -> raises FileNotFoundError
-        with pytest.raises(Exception):
+        with pytest.raises(FileNotFoundError):
             train_and_evaluate_improved_model(
                 dataset_path=str(temp_dir / "missing.csv"),
                 models_dir=str(mod_dir),
             )
 
         # Verify metadata file is still intact with original content
-        with open(meta_file, "r", encoding="utf-8") as f:
+        with open(meta_file, encoding="utf-8") as f:
             data = json.load(f)
         assert data["model_sha256"] == "PRESERVED_HASH"
 
@@ -218,10 +245,38 @@ def _make_mini_dataset(temp_dir: Path) -> Path:
     data_path = temp_dir / "mini_traffic.csv"
     rows = []
     for i in range(10):
-        rows.append({"packet_size": 60, "source_port": 1000 + i, "destination_port": 80, "protocol": 6, "tcp_syn": 1, "label": "PORT_SCAN"})
-        rows.append({"packet_size": 1500, "source_port": 5000 + i, "destination_port": 443, "protocol": 17, "tcp_syn": 0, "label": "HIGH_TRAFFIC"})
-        rows.append({"packet_size": 250, "source_port": 8000 + i, "destination_port": 53, "protocol": 17, "tcp_syn": 0, "label": "NORMAL"})
+        rows.append(
+            {
+                "packet_size": 60,
+                "source_port": 1000 + i,
+                "destination_port": 80,
+                "protocol": 6,
+                "tcp_syn": 1,
+                "label": "PORT_SCAN",
+            }
+        )
+        rows.append(
+            {
+                "packet_size": 1500,
+                "source_port": 5000 + i,
+                "destination_port": 443,
+                "protocol": 17,
+                "tcp_syn": 0,
+                "label": "HIGH_TRAFFIC",
+            }
+        )
+        rows.append(
+            {
+                "packet_size": 250,
+                "source_port": 8000 + i,
+                "destination_port": 53,
+                "protocol": 17,
+                "tcp_syn": 0,
+                "label": "NORMAL",
+            }
+        )
     import pandas as pd
+
     pd.DataFrame(rows).to_csv(data_path, index=False)
     return data_path
 
@@ -247,6 +302,7 @@ class TestModelActivationConsistencyAndRollback:
                 reports_dir=str(rep_dir),
                 random_state=42,
                 cv_folds=2,
+                param_grid={"n_estimators": [5], "max_depth": [3]},
             )
 
         # 1. Verify corrupt backup file was created
@@ -256,7 +312,7 @@ class TestModelActivationConsistencyAndRollback:
 
         # 2. Verify fresh model_metadata.json is valid and complete
         assert meta_file.exists()
-        with open(meta_file, "r", encoding="utf-8") as f:
+        with open(meta_file, encoding="utf-8") as f:
             new_meta = json.load(f)
 
         assert new_meta["model_version"] == "2.0.0"
@@ -286,6 +342,7 @@ class TestModelActivationConsistencyAndRollback:
             reports_dir=str(rep_dir),
             random_state=42,
             cv_folds=2,
+            param_grid={"n_estimators": [5], "max_depth": [3]},
         )
 
         # Verify no corrupt backups were created
@@ -293,7 +350,7 @@ class TestModelActivationConsistencyAndRollback:
         assert len(corrupt_backups) == 0
 
         # Verify custom fields were preserved
-        with open(meta_file, "r", encoding="utf-8") as f:
+        with open(meta_file, encoding="utf-8") as f:
             updated_meta = json.load(f)
 
         assert updated_meta["custom_deployment_id"] == "DEP-PROD-9900"
@@ -322,6 +379,7 @@ class TestModelActivationConsistencyAndRollback:
                 reports_dir=str(rep_dir),
                 random_state=42,
                 cv_folds=2,
+                param_grid={"n_estimators": [5], "max_depth": [3]},
             )
 
         # 1. Staged candidate model must have been hashed first
@@ -367,6 +425,7 @@ class TestModelActivationConsistencyAndRollback:
                     reports_dir=str(rep_dir),
                     random_state=42,
                     cv_folds=2,
+                    param_grid={"n_estimators": [5], "max_depth": [3]},
                 )
 
         # 1. Verify active model was rolled back to prior bytes
@@ -375,7 +434,7 @@ class TestModelActivationConsistencyAndRollback:
 
         # 2. Verify active metadata was untouched / rolled back
         assert meta_file.exists()
-        with open(meta_file, "r", encoding="utf-8") as f:
+        with open(meta_file, encoding="utf-8") as f:
             active_meta = json.load(f)
         assert active_meta["model_version"] == "1.0.0"
         assert active_meta["model_sha256"] == "ORIGINAL_HASH_123"
@@ -418,17 +477,19 @@ class TestModelActivationConsistencyAndRollback:
                     reports_dir=str(rep_dir),
                     random_state=42,
                     cv_folds=2,
+                    param_grid={"n_estimators": [5], "max_depth": [3]},
                 )
 
         # Verify rollback restored original model and metadata
         assert prod_model.read_bytes() == prior_model_bytes
-        with open(meta_file, "r", encoding="utf-8") as f:
+        with open(meta_file, encoding="utf-8") as f:
             active_meta = json.load(f)
         assert active_meta["model_sha256"] == "STABLE_HASH"
 
     def test_cache_invalidation_mechanism(self):
         """Verify that invalidate_model_cache safely resets _cached_model under _model_lock."""
         import ml.predictor as pred_module
+
         with pred_module._model_lock:
             pred_module._cached_model = "DUMMY_CACHED_MODEL"
 

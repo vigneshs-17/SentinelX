@@ -1,27 +1,29 @@
 import argparse
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import shutil
 import warnings
+from datetime import UTC, datetime
+from pathlib import Path
+
 import joblib
 import pandas as pd
-from sklearn.model_selection import train_test_split, StratifiedKFold, GridSearchCV
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, train_test_split
 
 from ml.evaluation.metrics import (
     compute_comprehensive_metrics,
     format_confusion_matrix_ascii,
 )
 from ml.predictor import (
-    calculate_model_sha256,
     _model_lock,
+    calculate_model_sha256,
     invalidate_model_cache,
 )
 
 
 class ModelActivationError(RuntimeError):
     """Raised when machine learning model or metadata activation fails during deployment."""
+
     pass
 
 
@@ -40,6 +42,7 @@ def train_and_evaluate_improved_model(
     reports_dir: str = "ml/evaluation/reports",
     random_state: int = 42,
     cv_folds: int = 5,
+    param_grid: dict | None = None,
 ) -> dict:
     """
     Trains an improved, regularized Random Forest model using Stratified K-Fold
@@ -65,21 +68,20 @@ def train_and_evaluate_improved_model(
     print(f"[+] Class counts:\n{df['label'].value_counts().to_string()}")
 
     # 2. Strict Train/Test Separation (Test set remains strictly unseen)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=random_state, stratify=y
-    )
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=random_state, stratify=y)
     print(f"\n[+] Train split: {len(X_train)} samples")
     print(f"[+] Test split : {len(X_test)} samples (Holdout, seed={random_state})")
 
     # 3. Stratified Cross-Validation on TRAINING SET ONLY
     print(f"\n[*] Performing {cv_folds}-Fold Stratified Cross-Validation on training data...")
-    param_grid = {
-        "n_estimators": [100, 150],
-        "max_depth": [6, 8, 10, None],
-        "min_samples_split": [2, 5, 10],
-        "min_samples_leaf": [1, 2, 4],
-        "class_weight": ["balanced", None],
-    }
+    if param_grid is None:
+        param_grid = {
+            "n_estimators": [100, 150],
+            "max_depth": [6, 8, 10, None],
+            "min_samples_split": [2, 5, 10],
+            "min_samples_leaf": [1, 2, 4],
+            "class_weight": ["balanced", None],
+        }
 
     cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
     base_rf = RandomForestClassifier(random_state=random_state)
@@ -126,8 +128,8 @@ def train_and_evaluate_improved_model(
     print("\n" + "-" * 70)
     print(" EVALUATION ON UNSEEN TEST HOLDOUT")
     print("-" * 70)
-    print(f"Training Accuracy : {train_acc:.4f} ({train_acc*100:.2f}%)")
-    print(f"Test Accuracy     : {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)")
+    print(f"Training Accuracy : {train_acc:.4f} ({train_acc * 100:.2f}%)")
+    print(f"Test Accuracy     : {metrics['accuracy']:.4f} ({metrics['accuracy'] * 100:.2f}%)")
     print(f"Test Macro F1     : {metrics['macro_f1']:.4f}")
     print(f"Test Weighted F1  : {metrics['weighted_f1']:.4f}")
     print(f"Test Macro FPR    : {metrics['macro_false_positive_rate']:.4f}")
@@ -145,11 +147,6 @@ def train_and_evaluate_improved_model(
             f"  Class {c:<14}: Prec={p['precision']:.4f}  Rec={p['recall']:.4f}  "
             f"F1={p['f1_score']:.4f}  FPR={p['false_positive_rate']:.4f}  FNR={p['false_negative_rate']:.4f}"
         )
-
-    # 6. Save Versioned Model Archive
-    v2_path = mod_dir / "sentinelx_model_v2.pkl"
-    joblib.dump(best_model, v2_path)
-    print(f"\n[+] Saved improved model archive to: {v2_path}")
 
     # -------------------------------------------------------------------------
     # TWO-PHASE STAGING, BACKUP, CONTROLLED ACTIVATION & ROLLBACK SEQUENCE
@@ -189,20 +186,20 @@ def train_and_evaluate_improved_model(
     existing_meta = {}
     if metadata_path.exists():
         try:
-            with open(metadata_path, "r", encoding="utf-8") as f:
+            with open(metadata_path, encoding="utf-8") as f:
                 existing_meta = json.load(f)
         except Exception as err:
-            timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            timestamp_str = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
             corrupt_backup = metadata_path.with_name(f"{metadata_path.name}.corrupt.{timestamp_str}.bak")
             if corrupt_backup.exists():
-                timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+                timestamp_str = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
                 corrupt_backup = metadata_path.with_name(f"{metadata_path.name}.corrupt.{timestamp_str}.bak")
             shutil.copy2(metadata_path, corrupt_backup)
             warn_msg = (
                 f"Existing model metadata at '{metadata_path}' was malformed JSON ({err}). "
                 f"Preserved corrupt metadata to '{corrupt_backup.name}'. Generating fresh metadata."
             )
-            warnings.warn(warn_msg, UserWarning)
+            warnings.warn(warn_msg, UserWarning, stacklevel=2)
             print(f"\n[!] WARNING: {warn_msg}")
             existing_meta = {}
 
@@ -220,7 +217,7 @@ def train_and_evaluate_improved_model(
         "model_version": "2.0.0",
         "model_type": "RandomForestClassifier",
         "model_sha256": staged_sha256,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "random_state": random_state,
         "features": FEATURE_COLUMNS,
         "classes": classes,
@@ -332,9 +329,7 @@ def train_and_evaluate_improved_model(
             # Re-invalidate cache to ensure predictor doesn't hold stale state
             invalidate_model_cache()
 
-            raise ModelActivationError(
-                f"Model activation failed and was safely rolled back: {exc}"
-            ) from exc
+            raise ModelActivationError(f"Model activation failed and was safely rolled back: {exc}") from exc
 
     # 8. Save Evaluation JSON Report
     report_json_path = rep_dir / "improved_evaluation.json"

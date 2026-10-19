@@ -1,7 +1,6 @@
-from collections import defaultdict, deque
 import threading
 import time
-from typing import Dict, Set, Tuple, Optional
+from collections import deque
 
 from config.settings import DETECTION_STATE_TTL, MAX_TRACKED_ENTRIES
 
@@ -13,9 +12,9 @@ class HostActivity:
         self.first_seen: float = first_seen
         self.last_seen: float = first_seen
         # Deque of SYN connection events: (timestamp, destination_ip, destination_port)
-        self.syn_events = deque()
+        self.syn_events: deque[tuple[float, str, int]] = deque()
         # Deque of all traffic events: (timestamp, byte_size, destination_ip, protocol)
-        self.traffic_events = deque()
+        self.traffic_events: deque[tuple[float, int, str, str]] = deque()
 
     def add_syn_event(self, timestamp: float, destination_ip: str, destination_port: int):
         self.last_seen = timestamp
@@ -48,7 +47,7 @@ class FlowTracker:
     ):
         self.ttl = ttl
         self.max_entries = max_entries
-        self.hosts: Dict[str, HostActivity] = {}
+        self.hosts: dict[str, HostActivity] = {}
         self._last_cleanup = time.time()
         self._cleanup_interval = 10.0  # seconds between opportunistic TTL sweeps
         self._lock = threading.RLock()
@@ -57,11 +56,11 @@ class FlowTracker:
         self,
         source_ip: str,
         destination_ip: str,
-        destination_port: Optional[int],
+        destination_port: int | None,
         protocol: str,
         packet_size: int = 0,
         tcp_syn: bool = False,
-        current_time: Optional[float] = None,
+        current_time: float | None = None,
     ):
         """Record packet event and update behavioral state."""
         now = current_time if current_time is not None else time.time()
@@ -93,8 +92,8 @@ class FlowTracker:
         source_ip: str,
         destination_ip: str,
         window: float,
-        current_time: Optional[float] = None,
-    ) -> Set[int]:
+        current_time: float | None = None,
+    ) -> set[int]:
         """
         Get unique destination ports targeted on the specific destination IP
         within the sliding time window.
@@ -109,11 +108,7 @@ class FlowTracker:
             host = self.hosts[source_ip]
             host.prune_syn_events(cutoff)
 
-            ports = {
-                event[2]
-                for event in host.syn_events
-                if event[1] == destination_ip and event[0] >= cutoff
-            }
+            ports = {event[2] for event in host.syn_events if event[1] == destination_ip and event[0] >= cutoff}
             return ports
 
     def get_horizontal_scan_targets(
@@ -121,8 +116,8 @@ class FlowTracker:
         source_ip: str,
         destination_port: int,
         window: float,
-        current_time: Optional[float] = None,
-    ) -> Set[str]:
+        current_time: float | None = None,
+    ) -> set[str]:
         """
         Get unique destination target IPs targeted on the specific destination port
         within the sliding time window.
@@ -137,19 +132,15 @@ class FlowTracker:
             host = self.hosts[source_ip]
             host.prune_syn_events(cutoff)
 
-            targets = {
-                event[1]
-                for event in host.syn_events
-                if event[2] == destination_port and event[0] >= cutoff
-            }
+            targets = {event[1] for event in host.syn_events if event[2] == destination_port and event[0] >= cutoff}
             return targets
 
     def get_traffic_rate(
         self,
         source_ip: str,
         window: float,
-        current_time: Optional[float] = None,
-    ) -> Tuple[int, float, int, float, float]:
+        current_time: float | None = None,
+    ) -> tuple[int, float, int, float, float]:
         """
         Get traffic rate statistics for source IP over sliding window:
         Returns: (packet_count, packet_rate_pps, byte_count, byte_rate_bps, window_duration)
@@ -173,24 +164,21 @@ class FlowTracker:
 
             return packet_count, packet_rate, byte_count, byte_rate, effective_window
 
-    def cleanup_expired(self, current_time: Optional[float] = None, ttl: Optional[float] = None) -> int:
+    def cleanup_expired(self, current_time: float | None = None, ttl: float | None = None) -> int:
         """Purge inactive host entries whose last_seen is older than ttl."""
         now = current_time if current_time is not None else time.time()
         max_age = ttl if ttl is not None else self.ttl
         cutoff = now - max_age
 
         with self._lock:
-            expired_ips = [
-                ip for ip, host in list(self.hosts.items())
-                if host.last_seen < cutoff
-            ]
+            expired_ips = [ip for ip, host in list(self.hosts.items()) if host.last_seen < cutoff]
 
             for ip in expired_ips:
                 self.hosts.pop(ip, None)
 
             return len(expired_ips)
 
-    def evict_lru(self, target_count: Optional[int] = None) -> int:
+    def evict_lru(self, target_count: int | None = None) -> int:
         """Evict oldest entries when max capacity is reached."""
         limit = target_count if target_count is not None else int(self.max_entries * 0.9)
         with self._lock:

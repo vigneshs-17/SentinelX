@@ -4,35 +4,30 @@ import threading
 import time
 
 from backend.api import app
-from capture.packet_capture import start_capture, process_packet
-from capture.pipeline import PacketPipeline
+from capture.packet_capture import start_capture
 from capture.pcap_replay import replay_pcap
+from capture.pipeline import PacketPipeline
+from config.logging_config import configure_logging
 from config.settings import (
-    CAPTURE_MODE,
-    CAPTURE_INTERFACE,
-    PCAP_FILE_PATH,
-    WORKER_COUNT,
-    QUEUE_MAXSIZE,
+    API_DEBUG,
     API_HOST,
     API_PORT,
-    API_DEBUG,
+    CAPTURE_INTERFACE,
+    CAPTURE_MODE,
+    PCAP_FILE_PATH,
+    QUEUE_MAXSIZE,
+    WORKER_COUNT,
 )
+from database.database import initialize_database
 
 
 def start_dashboard():
     print(f"[*] Starting SentinelX dashboard on {API_HOST}:{API_PORT}...")
-    app.run(
-        host=API_HOST,
-        port=API_PORT,
-        debug=API_DEBUG,
-        use_reloader=False
-    )
+    app.run(host=API_HOST, port=API_PORT, debug=API_DEBUG, use_reloader=False)
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(
-        description="SentinelX - Network Intrusion Detection & Threat Monitoring System"
-    )
+    parser = argparse.ArgumentParser(description="SentinelX - Network Intrusion Detection & Threat Monitoring System")
     parser.add_argument(
         "--mode",
         choices=["live", "pcap"],
@@ -61,6 +56,10 @@ def parse_arguments():
 def main():
     args = parse_arguments()
 
+    # Configure centralized logging and database schema
+    configure_logging()
+    initialize_database()
+
     print("=" * 60)
     print("        SENTINELX")
     print("        Network Intrusion Detection &")
@@ -70,10 +69,7 @@ def main():
     print("\n[*] Starting SentinelX components...\n")
 
     # Start Flask dashboard in background
-    dashboard_thread = threading.Thread(
-        target=start_dashboard,
-        daemon=True
-    )
+    dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
     dashboard_thread.start()
 
     # Give Flask a moment to start
@@ -85,7 +81,6 @@ def main():
     pipeline = PacketPipeline(
         maxsize=QUEUE_MAXSIZE,
         worker_count=args.workers,
-        processor=process_packet,
     )
 
     if args.mode == "pcap":

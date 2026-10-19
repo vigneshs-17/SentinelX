@@ -1,16 +1,15 @@
 import concurrent.futures
-from datetime import datetime, timezone
-import json
+
 import pytest
 
 from backend.api import app
 from config.settings import (
-    THREAT_TYPE_PORT_SCAN,
-    THREAT_TYPE_HIGH_TRAFFIC,
     API_DEFAULT_LIMIT,
     API_MAX_LIMIT,
+    THREAT_TYPE_HIGH_TRAFFIC,
+    THREAT_TYPE_PORT_SCAN,
 )
-from database.database import insert_alert, get_connection
+from database.database import insert_alert
 
 
 @pytest.fixture
@@ -155,7 +154,9 @@ class TestBackendApi:
             response = client.get(ep)
             assert response.headers.get("X-Content-Type-Options") == "nosniff", f"Missing nosniff on {ep}"
             assert response.headers.get("X-Frame-Options") == "SAMEORIGIN", f"Missing SAMEORIGIN on {ep}"
-            assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin", f"Missing Referrer-Policy on {ep}"
+            assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin", (
+                f"Missing Referrer-Policy on {ep}"
+            )
             assert response.headers.get("X-XSS-Protection") == "1; mode=block", f"Missing X-XSS-Protection on {ep}"
 
             # Content-Security-Policy
@@ -226,6 +227,7 @@ class TestBackendApi:
 
     def test_health_check_unhealthy_when_database_fails(self, client, monkeypatch):
         """Verify health check returns 503 Service Unavailable when DB connection fails."""
+
         def broken_conn():
             raise RuntimeError("Database unavailable")
 
@@ -240,15 +242,17 @@ class TestBackendApi:
         """Verify /api/alerts defaults to API_DEFAULT_LIMIT (100) and returns a JSON list."""
         # Insert 110 test alerts
         for i in range(110):
-            insert_alert({
-                "timestamp": f"2026-09-11T10:00:{i%60:02d}",
-                "threat_type": THREAT_TYPE_PORT_SCAN,
-                "severity": "HIGH",
-                "source_ip": f"10.0.0.{i % 255}",
-                "destination_ip": "10.0.0.1",
-                "protocol": "TCP",
-                "message": f"Alert {i}",
-            })
+            insert_alert(
+                {
+                    "timestamp": f"2026-09-11T10:00:{i % 60:02d}",
+                    "threat_type": THREAT_TYPE_PORT_SCAN,
+                    "severity": "HIGH",
+                    "source_ip": f"10.0.0.{i % 255}",
+                    "destination_ip": "10.0.0.1",
+                    "protocol": "TCP",
+                    "message": f"Alert {i}",
+                }
+            )
 
         response = client.get("/api/alerts")
         assert response.status_code == 200
@@ -265,15 +269,17 @@ class TestBackendApi:
     def test_alerts_custom_pagination(self, client):
         """Verify custom limit and offset parameters operate accurately."""
         for i in range(1, 21):
-            insert_alert({
-                "timestamp": "2026-09-11T12:00:00",
-                "threat_type": THREAT_TYPE_PORT_SCAN,
-                "severity": "LOW",
-                "source_ip": f"192.168.1.{i}",
-                "destination_ip": "192.168.1.254",
-                "protocol": "TCP",
-                "message": f"Alert {i}",
-            })
+            insert_alert(
+                {
+                    "timestamp": "2026-09-11T12:00:00",
+                    "threat_type": THREAT_TYPE_PORT_SCAN,
+                    "severity": "LOW",
+                    "source_ip": f"192.168.1.{i}",
+                    "destination_ip": "192.168.1.254",
+                    "protocol": "TCP",
+                    "message": f"Alert {i}",
+                }
+            )
 
         # Fetch 5 alerts skipping the first 5 (IDs should be 15, 14, 13, 12, 11)
         response = client.get("/api/alerts?limit=5&offset=5")
@@ -284,24 +290,28 @@ class TestBackendApi:
 
     def test_alerts_filtering_by_threat_type(self, client):
         """Verify filtering by threat_type."""
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:00",
-            "threat_type": THREAT_TYPE_PORT_SCAN,
-            "severity": "HIGH",
-            "source_ip": "10.0.0.1",
-            "destination_ip": "10.0.0.2",
-            "protocol": "TCP",
-            "message": "Scan alert",
-        })
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:01",
-            "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
-            "severity": "HIGH",
-            "source_ip": "10.0.0.3",
-            "destination_ip": "10.0.0.4",
-            "protocol": "UDP",
-            "message": "Traffic alert",
-        })
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:00",
+                "threat_type": THREAT_TYPE_PORT_SCAN,
+                "severity": "HIGH",
+                "source_ip": "10.0.0.1",
+                "destination_ip": "10.0.0.2",
+                "protocol": "TCP",
+                "message": "Scan alert",
+            }
+        )
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:01",
+                "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+                "severity": "HIGH",
+                "source_ip": "10.0.0.3",
+                "destination_ip": "10.0.0.4",
+                "protocol": "UDP",
+                "message": "Traffic alert",
+            }
+        )
 
         resp_scan = client.get(f"/api/alerts?threat_type={THREAT_TYPE_PORT_SCAN}")
         assert resp_scan.status_code == 200
@@ -317,33 +327,39 @@ class TestBackendApi:
 
     def test_alerts_filtering_by_severity_and_source_ip(self, client):
         """Verify filtering by severity and source_ip."""
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:00",
-            "threat_type": THREAT_TYPE_PORT_SCAN,
-            "severity": "HIGH",
-            "source_ip": "172.16.0.5",
-            "destination_ip": "172.16.0.1",
-            "protocol": "TCP",
-            "message": "High alert",
-        })
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:01",
-            "threat_type": THREAT_TYPE_PORT_SCAN,
-            "severity": "LOW",
-            "source_ip": "172.16.0.5",
-            "destination_ip": "172.16.0.1",
-            "protocol": "TCP",
-            "message": "Low alert",
-        })
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:02",
-            "threat_type": THREAT_TYPE_PORT_SCAN,
-            "severity": "HIGH",
-            "source_ip": "172.16.0.99",
-            "destination_ip": "172.16.0.1",
-            "protocol": "TCP",
-            "message": "Other IP alert",
-        })
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:00",
+                "threat_type": THREAT_TYPE_PORT_SCAN,
+                "severity": "HIGH",
+                "source_ip": "172.16.0.5",
+                "destination_ip": "172.16.0.1",
+                "protocol": "TCP",
+                "message": "High alert",
+            }
+        )
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:01",
+                "threat_type": THREAT_TYPE_PORT_SCAN,
+                "severity": "LOW",
+                "source_ip": "172.16.0.5",
+                "destination_ip": "172.16.0.1",
+                "protocol": "TCP",
+                "message": "Low alert",
+            }
+        )
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:02",
+                "threat_type": THREAT_TYPE_PORT_SCAN,
+                "severity": "HIGH",
+                "source_ip": "172.16.0.99",
+                "destination_ip": "172.16.0.1",
+                "protocol": "TCP",
+                "message": "Other IP alert",
+            }
+        )
 
         # Filter by source_ip and severity
         resp = client.get("/api/alerts?source_ip=172.16.0.5&severity=HIGH")
@@ -378,50 +394,58 @@ class TestBackendApi:
         """Verify /api/stats returns accurate metrics computed via a single atomic SQL query."""
         # Insert 3 HIGH PORT_SCAN
         for _ in range(3):
-            insert_alert({
-                "timestamp": "2026-09-11T12:00:00",
-                "threat_type": THREAT_TYPE_PORT_SCAN,
-                "severity": "HIGH",
-                "source_ip": "192.168.1.10",
-                "destination_ip": "192.168.1.1",
-                "protocol": "TCP",
-                "message": "Port scan high",
-            })
+            insert_alert(
+                {
+                    "timestamp": "2026-09-11T12:00:00",
+                    "threat_type": THREAT_TYPE_PORT_SCAN,
+                    "severity": "HIGH",
+                    "source_ip": "192.168.1.10",
+                    "destination_ip": "192.168.1.1",
+                    "protocol": "TCP",
+                    "message": "Port scan high",
+                }
+            )
 
         # Insert 2 LOW PORT_SCAN
         for _ in range(2):
-            insert_alert({
-                "timestamp": "2026-09-11T12:00:00",
-                "threat_type": THREAT_TYPE_PORT_SCAN,
-                "severity": "LOW",
-                "source_ip": "192.168.1.11",
-                "destination_ip": "192.168.1.1",
-                "protocol": "TCP",
-                "message": "Port scan low",
-            })
+            insert_alert(
+                {
+                    "timestamp": "2026-09-11T12:00:00",
+                    "threat_type": THREAT_TYPE_PORT_SCAN,
+                    "severity": "LOW",
+                    "source_ip": "192.168.1.11",
+                    "destination_ip": "192.168.1.1",
+                    "protocol": "TCP",
+                    "message": "Port scan low",
+                }
+            )
 
         # Insert 4 HIGH HIGH_TRAFFIC
         for _ in range(4):
-            insert_alert({
-                "timestamp": "2026-09-11T12:00:00",
-                "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
-                "severity": "HIGH",
-                "source_ip": "192.168.1.12",
-                "destination_ip": "192.168.1.1",
-                "protocol": "UDP",
-                "message": "High traffic high",
-            })
+            insert_alert(
+                {
+                    "timestamp": "2026-09-11T12:00:00",
+                    "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+                    "severity": "HIGH",
+                    "source_ip": "192.168.1.12",
+                    "destination_ip": "192.168.1.1",
+                    "protocol": "UDP",
+                    "message": "High traffic high",
+                }
+            )
 
         # Insert 1 MEDIUM HIGH_TRAFFIC
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:00",
-            "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
-            "severity": "MEDIUM",
-            "source_ip": "192.168.1.13",
-            "destination_ip": "192.168.1.1",
-            "protocol": "UDP",
-            "message": "High traffic med",
-        })
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:00",
+                "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+                "severity": "MEDIUM",
+                "source_ip": "192.168.1.13",
+                "destination_ip": "192.168.1.1",
+                "protocol": "UDP",
+                "message": "High traffic med",
+            }
+        )
 
         response = client.get("/api/stats")
         assert response.status_code == 200
@@ -430,7 +454,7 @@ class TestBackendApi:
         # Contract assertion: exact keys and integer types
         assert stats["total_alerts"] == 10
         assert stats["high_severity"] == 7  # 3 port scan + 4 high traffic
-        assert stats["port_scans"] == 5    # 3 high + 2 low
+        assert stats["port_scans"] == 5  # 3 high + 2 low
         assert stats["high_traffic"] == 5  # 4 high + 1 med
         for k in ["total_alerts", "high_severity", "port_scans", "high_traffic"]:
             assert isinstance(stats[k], int)
@@ -473,15 +497,17 @@ class TestBackendApi:
         """Verify concurrent API requests and DB operations execute safely under SQLite WAL mode."""
         # Seed 10 alerts
         for i in range(10):
-            insert_alert({
-                "timestamp": "2026-09-11T12:00:00",
-                "threat_type": THREAT_TYPE_PORT_SCAN,
-                "severity": "HIGH",
-                "source_ip": f"10.1.1.{i}",
-                "destination_ip": "10.1.1.254",
-                "protocol": "TCP",
-                "message": f"Concurrent seed {i}",
-            })
+            insert_alert(
+                {
+                    "timestamp": "2026-09-11T12:00:00",
+                    "threat_type": THREAT_TYPE_PORT_SCAN,
+                    "severity": "HIGH",
+                    "source_ip": f"10.1.1.{i}",
+                    "destination_ip": "10.1.1.254",
+                    "protocol": "TCP",
+                    "message": f"Concurrent seed {i}",
+                }
+            )
 
         def request_worker(task_id):
             c = app.test_client()

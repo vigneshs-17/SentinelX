@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 # SentinelX Detection Configuration
 
@@ -48,9 +49,17 @@ API_MAX_LIMIT = int(os.getenv("SENTINELX_API_MAX_LIMIT", "500"))
 ALLOW_LOCAL_FILE_CORS = os.getenv("SENTINELX_ALLOW_LOCAL_FILE_CORS", "false").lower() == "true"
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv(
-        "SENTINELX_CORS_ORIGINS",
-        "http://127.0.0.1:5000,http://localhost:5000"
-    ).split(",")
+    for origin in os.getenv("SENTINELX_CORS_ORIGINS", "http://127.0.0.1:5000,http://localhost:5000").split(",")
     if origin.strip()
 ]
+
+# Storage & Sensor Configuration
+DATA_DIR = Path(os.getenv("SENTINELX_DATA_DIR", "data"))
+DEFAULT_DATABASE_FILE = DATA_DIR / "sentinelx.db"
+DEFAULT_ALERT_FILE = DATA_DIR / "alerts.jsonl"
+SENSOR_ID = os.getenv("SENTINELX_SENSOR_ID", "sensor-1")
+STATS_INTERVAL = float(os.getenv("SENTINELX_STATS_INTERVAL", "10.0"))
+
+# Severity Ratio Thresholds (Observed / Threshold)
+SEVERITY_RATIO_HIGH = float(os.getenv("SENTINELX_SEVERITY_RATIO_HIGH", "3.0"))
+SEVERITY_RATIO_MEDIUM = float(os.getenv("SENTINELX_SEVERITY_RATIO_MEDIUM", "1.0"))

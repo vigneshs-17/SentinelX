@@ -5,9 +5,14 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Test & lint caches
+# Test & lint caches & coverage
 .pytest_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+
+# Local data
+data/
 
 # Databases
 database/*.db

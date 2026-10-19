@@ -77,8 +77,8 @@
     }
   },
   "model_label": "Baseline Model (v1)",
-  "model_path": "D:\\SentinelX\\ml\\models\\sentinelx_model_v1_baseline.pkl",
-  "dataset_path": "D:\\SentinelX\\ml\\data\\network_traffic.csv",
+  "model_path": "ml/models/sentinelx_model_v1_baseline.pkl",
+  "dataset_path": "ml/data/network_traffic.csv",
   "test_size": 0.2,
   "random_state": 42
 }

@@ -1,21 +1,22 @@
 from pathlib import Path
-from typing import Dict, List, Any
-import time
+from typing import Any
 
 from config.settings import (
-    VERTICAL_SCAN_THRESHOLD,
-    HORIZONTAL_SCAN_THRESHOLD,
-    HIGH_TRAFFIC_PACKET_THRESHOLD,
-    HIGH_TRAFFIC_PACKET_RATE_THRESHOLD,
-    THREAT_TYPE_PORT_SCAN,
     THREAT_TYPE_HIGH_TRAFFIC,
+    THREAT_TYPE_PORT_SCAN,
 )
-from detection.rule_engine import detect_port_scan, flow_tracker, connection_tracker, last_scan_alert_time
-from detection.traffic_rules import detect_high_traffic, packet_tracker, alert_active, _traffic_history, _last_alert_time
+from detection.rule_engine import connection_tracker, detect_port_scan, flow_tracker, last_scan_alert_time
+from detection.traffic_rules import (
+    _last_alert_time,
+    _traffic_history,
+    alert_active,
+    detect_high_traffic,
+    packet_tracker,
+)
 from ml.predictor import predict_threat
 
 
-def run_hybrid_comparison_experiment() -> Dict[str, Any]:
+def run_hybrid_comparison_experiment() -> dict[str, Any]:
     """
     Evaluates ML-only classification, Rule-only detection, and Combined Hybrid
     detection across distinct threat and benign traffic scenarios.
@@ -29,10 +30,7 @@ def run_hybrid_comparison_experiment() -> Dict[str, Any]:
     _traffic_history.clear()
     _last_alert_time.clear()
 
-    results = {
-        "scenarios": {},
-        "summary": {}
-    }
+    results: dict[str, Any] = {"scenarios": {}, "summary": {}}
 
     # Scenario 1: Vertical Port Scan (15 SYN packets to 15 different ports on target)
     scan_packets = [

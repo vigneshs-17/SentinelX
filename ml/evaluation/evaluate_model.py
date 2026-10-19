@@ -1,7 +1,8 @@
 import argparse
 import json
+import logging
 from pathlib import Path
-import sys
+
 import joblib
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -9,9 +10,9 @@ from sklearn.model_selection import train_test_split
 from ml.evaluation.metrics import (
     compute_comprehensive_metrics,
     format_confusion_matrix_ascii,
-    format_metrics_markdown_table,
 )
 
+logger = logging.getLogger("sentinelx.ml.evaluate")
 
 FEATURE_COLUMNS = [
     "packet_size",
@@ -27,7 +28,7 @@ def evaluate_model_pipeline(
     dataset_path: str,
     test_size: float = 0.2,
     random_state: int = 42,
-    output_json: str = None,
+    output_json: str | None = None,
     model_label: str = "Model",
 ) -> dict:
     """
@@ -62,8 +63,8 @@ def evaluate_model_pipeline(
     if hasattr(model, "predict_proba"):
         try:
             y_prob = model.predict_proba(X_test)
-        except Exception:
-            pass
+        except (AttributeError, ValueError, NotImplementedError) as exc:
+            logger.debug("predict_proba evaluation not supported by model: %s", exc)
 
     metrics = compute_comprehensive_metrics(
         y_true=y_test.tolist(),
@@ -73,22 +74,27 @@ def evaluate_model_pipeline(
     )
 
     metrics["model_label"] = model_label
-    metrics["model_path"] = str(mod_file)
-    metrics["dataset_path"] = str(data_file)
+    try:
+        metrics["model_path"] = str(mod_file.relative_to(Path.cwd()))
+    except ValueError:
+        metrics["model_path"] = str(mod_file)
+    try:
+        metrics["dataset_path"] = str(data_file.relative_to(Path.cwd()))
+    except ValueError:
+        metrics["dataset_path"] = str(data_file)
     metrics["test_size"] = test_size
     metrics["random_state"] = random_state
 
     # Format text outputs
     ascii_cm = format_confusion_matrix_ascii(metrics["confusion_matrix"], metrics["classes"])
-    md_table = format_metrics_markdown_table(metrics, title=f"{model_label} Evaluation Results")
 
     print("\n" + "=" * 70)
     print(f" EVALUATION: {model_label.upper()}")
     print("=" * 70)
     print(f"Model Artifact : {mod_file.name}")
     print(f"Dataset Samples: {len(df)} total ({len(X_test)} in test holdout)")
-    print(f"Test Split     : {test_size*100:.0f}% (Stratified, seed={random_state})")
-    print(f"Accuracy       : {metrics['accuracy']:.4f} ({metrics['accuracy']*100:.2f}%)")
+    print(f"Test Split     : {test_size * 100:.0f}% (Stratified, seed={random_state})")
+    print(f"Accuracy       : {metrics['accuracy']:.4f} ({metrics['accuracy'] * 100:.2f}%)")
     print(f"Macro F1-Score : {metrics['macro_f1']:.4f}")
     print(f"Weighted F1    : {metrics['weighted_f1']:.4f}")
     print(f"Macro FPR      : {metrics['macro_false_positive_rate']:.4f}")

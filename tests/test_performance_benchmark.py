@@ -1,18 +1,15 @@
 import time
-import pytest
+
 from scapy.all import IP, TCP
 
-from capture.pipeline import PacketPipeline
 from capture.packet_parser import parse_packet
-from detection.rule_engine import detect_port_scan, connection_tracker, last_scan_alert_time
-from detection.traffic_rules import detect_high_traffic, packet_tracker, alert_active
+from capture.pipeline import PacketPipeline
+from detection.rule_engine import connection_tracker, detect_port_scan, last_scan_alert_time
+from detection.traffic_rules import alert_active, detect_high_traffic, packet_tracker
 
 
 def make_benchmark_packet(port: int):
-    return (
-        IP(src="192.168.1.50", dst="192.168.1.1")
-        / TCP(sport=40000 + (port % 1000), dport=port, flags="S")
-    )
+    return IP(src="192.168.1.50", dst="192.168.1.1") / TCP(sport=40000 + (port % 1000), dport=port, flags="S")
 
 
 def test_performance_benchmark_queue_vs_synchronous():

@@ -2,7 +2,7 @@ import os
 import tempfile
 
 from database.database import initialize_database
-from logs.alert_logger import log_alert, get_alert_file_path
+from logs.alert_logger import get_alert_file_path, log_alert
 
 
 def test_alert_logging():
@@ -12,7 +12,7 @@ def test_alert_logging():
         "severity": "HIGH",
         "source_ip": "192.168.1.100",
         "destination_port_count": 10,
-        "message": "Test port scan alert"
+        "message": "Test port scan alert",
     }
 
     # Save the alert

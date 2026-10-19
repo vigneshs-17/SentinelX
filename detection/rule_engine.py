@@ -1,20 +1,20 @@
-from collections import defaultdict
 import threading
 import time
-from typing import Optional, Dict, Any
+from collections import defaultdict
+from typing import Any
 
 from config.settings import (
-    PORT_SCAN_THRESHOLD,
-    VERTICAL_SCAN_THRESHOLD,
-    HORIZONTAL_SCAN_THRESHOLD,
-    PORT_SCAN_TIME_WINDOW,
-    PORT_SCAN_ALERT_COOLDOWN,
-    THREAT_TYPE_PORT_SCAN,
     DETECTION_STATE_TTL,
+    HORIZONTAL_SCAN_THRESHOLD,
     MAX_TRACKED_ENTRIES,
+    PORT_SCAN_ALERT_COOLDOWN,
+    PORT_SCAN_THRESHOLD,
+    PORT_SCAN_TIME_WINDOW,
+    THREAT_TYPE_PORT_SCAN,
+    VERTICAL_SCAN_THRESHOLD,
 )
 from detection.flow_tracker import FlowTracker
-
+from detection.scoring import calculate_confidence, calculate_severity
 
 # Shared flow tracker instance with bounded capacity and TTL cleanup
 flow_tracker = FlowTracker(ttl=DETECTION_STATE_TTL, max_entries=MAX_TRACKED_ENTRIES)
@@ -23,8 +23,8 @@ flow_tracker = FlowTracker(ttl=DETECTION_STATE_TTL, max_entries=MAX_TRACKED_ENTR
 _scan_lock = threading.Lock()
 
 # Backward-compatible tracking structures
-connection_tracker = defaultdict(list)
-last_scan_alert_time: Dict[Any, float] = {}
+connection_tracker: defaultdict[str, list[tuple[float, int]]] = defaultdict(list)
+last_scan_alert_time: dict[Any, float] = {}
 
 
 def _calculate_scan_confidence(count: int, threshold: int) -> float:
@@ -36,42 +36,34 @@ def _calculate_scan_confidence(count: int, threshold: int) -> float:
     return round(score, 2)
 
 
-def detect_port_scan(packet_data: dict) -> Optional[dict]:
+def detect_port_scan(packet_data: dict) -> dict | None:
     """
     Enhanced port scan detection distinguishing Vertical and Horizontal scans:
-    
+
     1. Vertical Scan: Single source probing many ports on the SAME target host.
     2. Horizontal Scan: Single source probing the SAME port across MANY target hosts.
-    
+
     Returns structured alert with evidence, scan_type, and confidence score,
     or None if no scan pattern is met.
     """
     source_ip = packet_data.get("source_ip")
-    destination_ip = packet_data.get("destination_ip") or "0.0.0.0"
+    destination_ip = packet_data.get("destination_ip") or "0.0.0.0"  # nosec: B104  # Fallback IP literal, not a socket bind
     destination_port = packet_data.get("destination_port")
     protocol = packet_data.get("protocol")
     tcp_syn = packet_data.get("tcp_syn", False)
 
     # Only inspect TCP SYN connection attempts (fast pre-lock filter)
-    if (
-        source_ip is None
-        or destination_port is None
-        or protocol != "TCP"
-        or not tcp_syn
-    ):
+    if source_ip is None or destination_port is None or protocol != "TCP" or not tcp_syn:
         return None
 
     current_time = time.time()
-    alert_info = None
+    alert_info: dict[str, Any] | None = None
 
     with _scan_lock:
         # Synchronize backward-compatible connection_tracker
         connection_tracker[source_ip].append((current_time, destination_port))
         cutoff = current_time - PORT_SCAN_TIME_WINDOW
-        connection_tracker[source_ip] = [
-            entry for entry in connection_tracker[source_ip]
-            if entry[0] >= cutoff
-        ]
+        connection_tracker[source_ip] = [entry for entry in connection_tracker[source_ip] if entry[0] >= cutoff]
 
         # Record into FlowTracker
         flow_tracker.record_packet(
@@ -152,12 +144,13 @@ def detect_port_scan(packet_data: dict) -> Optional[dict]:
         unique_port_count = alert_info["unique_port_count"]
         effective_vertical_threshold = alert_info["effective_threshold"]
         port_list = alert_info["port_list"]
-        confidence = _calculate_scan_confidence(unique_port_count, effective_vertical_threshold)
+        severity = calculate_severity(unique_port_count, effective_vertical_threshold)
+        confidence = calculate_confidence(unique_port_count, effective_vertical_threshold)
 
         return {
             "threat_type": THREAT_TYPE_PORT_SCAN,
             "scan_type": "VERTICAL",
-            "severity": "HIGH",
+            "severity": severity,
             "confidence": confidence,
             "source_ip": source_ip,
             "destination_ip": destination_ip,
@@ -180,12 +173,13 @@ def detect_port_scan(packet_data: dict) -> Optional[dict]:
     if alert_info["scan_type"] == "HORIZONTAL":
         target_count = alert_info["target_count"]
         target_list = alert_info["target_list"]
-        confidence = _calculate_scan_confidence(target_count, HORIZONTAL_SCAN_THRESHOLD)
+        severity = calculate_severity(target_count, HORIZONTAL_SCAN_THRESHOLD)
+        confidence = calculate_confidence(target_count, HORIZONTAL_SCAN_THRESHOLD)
 
         return {
             "threat_type": THREAT_TYPE_PORT_SCAN,
             "scan_type": "HORIZONTAL",
-            "severity": "HIGH",
+            "severity": severity,
             "confidence": confidence,
             "source_ip": source_ip,
             "destination_port": destination_port,
@@ -205,6 +199,8 @@ def detect_port_scan(packet_data: dict) -> Optional[dict]:
                 f"targeting port {destination_port} across {target_count} hosts in {PORT_SCAN_TIME_WINDOW:.0f}s"
             ),
         }
+
+    return None
 
 
 if __name__ == "__main__":
