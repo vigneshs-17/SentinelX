@@ -36,9 +36,7 @@ def start_capture(iface: str | None = None, pipeline_instance: PacketPipeline | 
     interface = iface or CAPTURE_INTERFACE
 
     print("[*] SentinelX IDS started...")
-    print(
-        f"[*] Mode: Producer-Consumer (Queue size: {active_pipeline.maxsize}, Workers: {active_pipeline.worker_count})"
-    )
+    print(f"[*] Mode: Producer-Consumer (Queue size: {active_pipeline.maxsize}, Workers: 1)")
     if interface:
         print(f"[*] Interface: {interface}")
     print("[*] Monitoring network traffic...")

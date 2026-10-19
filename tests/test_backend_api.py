@@ -472,6 +472,8 @@ class TestBackendApi:
             "total_alerts": 0,
             "high_severity": 0,
             "port_scans": 0,
+            "syn_floods": 0,
+            "volumetric": 0,
             "high_traffic": 0,
         }
 

@@ -32,7 +32,7 @@ def replay_pcap(
         print("=" * 60)
         print(f"[*] PCAP File : {path.resolve()}")
         print(f"[*] Queue Size: {active_pipeline.maxsize}")
-        print(f"[*] Workers   : {active_pipeline.worker_count}")
+        print("[*] Workers   : 1 (single-consumer)")
         print(f"[*] Delay/Pkt : {delay}s\n")
 
     active_pipeline.start()

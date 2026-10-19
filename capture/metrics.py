@@ -14,6 +14,7 @@ class PipelineMetrics:
         self.packets_processed = 0
         self.packets_dropped = 0
         self.processing_errors = 0
+        self.parse_errors = 0
         self.alerts_generated = 0
 
     def record_received(self, count: int = 1):
@@ -36,6 +37,10 @@ class PipelineMetrics:
         with self._lock:
             self.processing_errors += count
 
+    def record_parse_error(self, count: int = 1):
+        with self._lock:
+            self.parse_errors += count
+
     def record_alert(self, count: int = 1):
         with self._lock:
             self.alerts_generated += count
@@ -48,6 +53,7 @@ class PipelineMetrics:
             self.packets_processed = 0
             self.packets_dropped = 0
             self.processing_errors = 0
+            self.parse_errors = 0
             self.alerts_generated = 0
 
     def get_snapshot(self, queue=None) -> dict:
@@ -63,6 +69,7 @@ class PipelineMetrics:
                 "packets_processed": self.packets_processed,
                 "packets_dropped": self.packets_dropped,
                 "processing_errors": self.processing_errors,
+                "parse_errors": self.parse_errors,
                 "alerts_generated": self.alerts_generated,
                 "current_queue_size": current_queue_size,
             }
@@ -75,5 +82,6 @@ class PipelineMetrics:
             f"processed={snap['packets_processed']} "
             f"dropped={snap['packets_dropped']} "
             f"errors={snap['processing_errors']} "
+            f"parse_errors={snap['parse_errors']} "
             f"alerts={snap['alerts_generated']}>"
         )

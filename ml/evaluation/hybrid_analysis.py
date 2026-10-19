@@ -4,15 +4,9 @@ from typing import Any
 from config.settings import (
     THREAT_TYPE_HIGH_TRAFFIC,
     THREAT_TYPE_PORT_SCAN,
+    THREAT_TYPE_VOLUMETRIC,
 )
-from detection.rule_engine import connection_tracker, detect_port_scan, flow_tracker, last_scan_alert_time
-from detection.traffic_rules import (
-    _last_alert_time,
-    _traffic_history,
-    alert_active,
-    detect_high_traffic,
-    packet_tracker,
-)
+from detection.engine import DetectionEngine
 from ml.predictor import predict_threat
 
 
@@ -21,20 +15,13 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
     Evaluates ML-only classification, Rule-only detection, and Combined Hybrid
     detection across distinct threat and benign traffic scenarios.
     """
-    # Clear all state
-    flow_tracker.clear()
-    connection_tracker.clear()
-    last_scan_alert_time.clear()
-    packet_tracker.clear()
-    alert_active.clear()
-    _traffic_history.clear()
-    _last_alert_time.clear()
-
     results: dict[str, Any] = {"scenarios": {}, "summary": {}}
 
     # Scenario 1: Vertical Port Scan (15 SYN packets to 15 different ports on target)
+    scan_engine = DetectionEngine()
     scan_packets = [
         {
+            "ts": 1000.0 + i * 0.1,
             "source_ip": "192.168.1.105",
             "destination_ip": "192.168.1.1",
             "source_port": 50000 + i,
@@ -51,12 +38,13 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
     hybrid_scan_confirmed = []
 
     for p in scan_packets:
-        ra = detect_port_scan(p)
-        if ra:
-            rule_scan_alerts.append(ra)
+        alerts = scan_engine.process_packet(p)
+        for ra in alerts:
+            alert_dict = ra.to_dict()
+            rule_scan_alerts.append(alert_dict)
             ml_p = predict_threat(p)
-            if ml_p == ra["threat_type"]:
-                hybrid_scan_confirmed.append(ra)
+            if ml_p == alert_dict["threat_type"]:
+                hybrid_scan_confirmed.append(alert_dict)
 
     results["scenarios"]["vertical_port_scan"] = {
         "packet_count": 15,
@@ -72,8 +60,10 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
     }
 
     # Scenario 2: Volumetric Traffic Flood (1,050 packets within window)
+    flood_engine = DetectionEngine()
     flood_packets = [
         {
+            "ts": 2000.0 + i * 0.005,
             "source_ip": "10.0.0.99",
             "destination_ip": "10.0.0.1",
             "source_port": 40000 + (i % 100),
@@ -90,28 +80,31 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
     hybrid_flood_confirmed = []
 
     for p in flood_packets:
-        ra = detect_high_traffic(p)
-        if ra:
-            rule_flood_alerts.append(ra)
+        alerts = flood_engine.process_packet(p)
+        for ra in alerts:
+            alert_dict = ra.to_dict()
+            rule_flood_alerts.append(alert_dict)
             ml_p = predict_threat(p)
-            if ml_p == ra["threat_type"]:
-                hybrid_flood_confirmed.append(ra)
+            if ml_p in (alert_dict["threat_type"], THREAT_TYPE_HIGH_TRAFFIC, THREAT_TYPE_VOLUMETRIC):
+                hybrid_flood_confirmed.append(alert_dict)
 
     results["scenarios"]["high_traffic_flood"] = {
         "packet_count": 1050,
-        "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+        "threat_type": THREAT_TYPE_VOLUMETRIC,
         "ml_only_detections": ml_flood_detections,
         "rule_only_alerts": len(rule_flood_alerts),
         "hybrid_confirmed_alerts": len(hybrid_flood_confirmed),
         "observation": (
             f"ML flags {ml_flood_detections} individual packets as HIGH_TRAFFIC based on packet size. "
-            f"Rule-only triggers 1 structured alert with exact rate metrics (pps and Bps). "
+            f"Rule-only triggers structured alert with exact rate metrics (pps and Bps). "
             f"Hybrid combines rule alert with ML confirmation."
         ),
     }
 
     # Scenario 3: Single Isolated Large HTTPS Download Packet (Benign web browsing)
+    benign_engine = DetectionEngine()
     benign_large_packet = {
+        "ts": 3000.0,
         "source_ip": "172.16.1.5",
         "destination_ip": "172.16.1.1",
         "source_port": 54321,
@@ -122,14 +115,13 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
     }
 
     ml_benign_pred = predict_threat(benign_large_packet)
-    rule_benign_scan = detect_port_scan(benign_large_packet)
-    rule_benign_traffic = detect_high_traffic(benign_large_packet)
+    rule_benign_alerts = benign_engine.process_packet(benign_large_packet)
 
     results["scenarios"]["benign_large_packet"] = {
         "packet_count": 1,
         "expected_verdict": "NORMAL",
         "ml_only_verdict": ml_benign_pred,
-        "rule_only_alert": rule_benign_scan is not None or rule_benign_traffic is not None,
+        "rule_only_alert": len(rule_benign_alerts) > 0,
         "observation": (
             f"ML predicts '{ml_benign_pred}' on a single benign HTTPS packet because size=1400. "
             "Rule-only correctly emits NO alert because volume is 1 packet. "
@@ -157,7 +149,7 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
             f"1 Confirmed Alert (`ml_confirmed=True`) |"
         ),
         (
-            f"| **High-Traffic Volumetric Flood** | 1050 Packets | Attack (`HIGH_TRAFFIC`) | "
+            f"| **Volumetric Flood** | 1050 Packets | Attack (`VOLUMETRIC`) | "
             f"{results['scenarios']['high_traffic_flood']['ml_only_detections']} packet flags | "
             f"{results['scenarios']['high_traffic_flood']['rule_only_alerts']} volumetric alert (with pps/Bps) | "
             f"1 Confirmed Alert (`ml_confirmed=True`) |"
@@ -185,6 +177,7 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
     ]
 
     report_path = Path("ml/evaluation/reports/hybrid_analysis_report.md")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(report_lines), encoding="utf-8")
     print(f"[+] Saved hybrid analysis report to: {report_path.resolve()}")
 

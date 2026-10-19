@@ -699,10 +699,17 @@
             border: 1px solid var(--accent-indigo-border);
         }
 
-        .badge-threat-high_traffic {
+        .badge-threat-high_traffic,
+        .badge-threat-volumetric {
             background: var(--accent-amber-bg);
             color: #fde68a;
             border: 1px solid var(--accent-amber-border);
+        }
+
+        .badge-threat-syn_flood {
+            background: var(--accent-rose-bg);
+            color: #fecdd3;
+            border: 1px solid var(--accent-rose-border);
         }
 
         .badge-threat-unknown {
@@ -1079,6 +1086,8 @@
                 <div class="filter-group" role="group" aria-label="Filter by Threat Category">
                     <button type="button" class="filter-btn active" data-threat="ALL" aria-pressed="true">All Threats</button>
                     <button type="button" class="filter-btn" data-threat="PORT_SCAN" aria-pressed="false">Port Scans</button>
+                    <button type="button" class="filter-btn" data-threat="SYN_FLOOD" aria-pressed="false">SYN Flood</button>
+                    <button type="button" class="filter-btn" data-threat="VOLUMETRIC" aria-pressed="false">Volumetric</button>
                     <button type="button" class="filter-btn" data-threat="HIGH_TRAFFIC" aria-pressed="false">High Traffic</button>
                 </div>
 
@@ -1938,7 +1947,7 @@ function parseUrlParameters() {
             if (searchInput) searchInput.value = search;
             if (clearSearchBtn) clearSearchBtn.style.display = "block";
         }
-        if (threat && ["ALL", "PORT_SCAN", "HIGH_TRAFFIC"].includes(threat.toUpperCase())) {
+        if (threat && ["ALL", "PORT_SCAN", "SYN_FLOOD", "VOLUMETRIC", "HIGH_TRAFFIC"].includes(threat.toUpperCase())) {
             UI_STATE.threatFilter = threat.toUpperCase();
             document.querySelectorAll("[data-threat]").forEach(btn => {
                 const isActive = btn.getAttribute("data-threat") === UI_STATE.threatFilter;

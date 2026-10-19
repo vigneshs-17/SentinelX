@@ -2,8 +2,8 @@
 Decoupled Producer-Consumer packet processing pipeline for SentinelX.
 
 The producer (Scapy sniff or PCAP replay) puts raw packets into a
-bounded thread-safe queue. One or more worker threads consume packets
-and run parsing, rule detection, ML inference, and alert persistence.
+bounded thread-safe queue. A single consumer worker thread consumes packets
+and executes parsing, rule detection, ML inference, and alert persistence (Correction 8).
 Emits periodic pipeline throughput and health summaries at INFO level.
 """
 
@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from capture.metrics import PipelineMetrics
-from config.settings import QUEUE_MAXSIZE, QUEUE_TIMEOUT, STATS_INTERVAL, WORKER_COUNT
+from config.settings import QUEUE_MAXSIZE, QUEUE_TIMEOUT, STATS_INTERVAL
 
 logger = logging.getLogger("sentinelx.pipeline")
 
@@ -25,22 +25,21 @@ STOP_TOKEN = object()
 class PacketPipeline:
     """
     Decoupled Producer-Consumer packet processing pipeline for SentinelX.
+    Uses a single dedicated consumer worker thread for ordered, deterministic processing.
     """
 
     def __init__(
         self,
         maxsize: int = QUEUE_MAXSIZE,
-        worker_count: int = WORKER_COUNT,
         processor: Callable | None = None,
         stats_interval: float = STATS_INTERVAL,
     ):
         self.maxsize = maxsize
-        self.worker_count = max(1, worker_count)
         self.queue: queue.Queue[Any] = queue.Queue(maxsize=self.maxsize)
         self.metrics = PipelineMetrics()
         self.stats_interval = stats_interval
         self.stop_event = threading.Event()
-        self.workers: list[threading.Thread] = []
+        self.worker: threading.Thread | None = None
         self._stats_thread: threading.Thread | None = None
         self._last_drop_log_time = 0.0
         self._drop_warning_interval = 2.0  # seconds between warnings
@@ -60,7 +59,6 @@ class PacketPipeline:
             processor.metrics = self.metrics
             self.processor = getattr(processor, "process", processor)
         else:
-            # Check if function name is process_packet to bind to active pipeline
             if getattr(processor, "__name__", "") == "process_packet":
                 from capture.processor import PacketProcessor
 
@@ -105,17 +103,16 @@ class PacketPipeline:
                 break
 
             try:
-                if self.processor is not None:
-                    self.processor(item)
+                self.processor(item)
                 self.metrics.record_processed()
-            except Exception as error:
+            except Exception as exc:
                 self.metrics.record_error()
-                logger.error("[WORKER-%d ERROR] Failed to process packet: %s", worker_id, error)
+                logger.error("[PIPELINE ERROR] Worker %d failed to process packet: %s", worker_id, exc)
             finally:
                 self.queue.task_done()
 
     def _stats_monitor_loop(self) -> None:
-        """Periodic background monitor emitting pipeline metrics summary at INFO level."""
+        """Periodically reports pipeline throughput and buffer statistics at INFO level."""
         last_time = time.time()
         last_processed = self.metrics.packets_processed
 
@@ -137,18 +134,15 @@ class PacketPipeline:
             )
 
     def start(self) -> None:
-        """Start worker threads and background periodic stats reporter."""
+        """Start single consumer worker thread and background periodic stats reporter."""
         self.stop_event.clear()
-        self.workers = []
-        for i in range(self.worker_count):
-            worker = threading.Thread(
-                target=self._worker_loop,
-                args=(i + 1,),
-                name=f"PacketWorker-{i + 1}",
-                daemon=True,
-            )
-            worker.start()
-            self.workers.append(worker)
+        self.worker = threading.Thread(
+            target=self._worker_loop,
+            args=(1,),
+            name="PacketWorker-1",
+            daemon=True,
+        )
+        self.worker.start()
 
         if self.stats_interval > 0:
             self._stats_thread = threading.Thread(
@@ -160,7 +154,7 @@ class PacketPipeline:
 
     def stop(self, drain: bool = True, timeout: float = 5.0) -> None:
         """
-        Stop worker threads cleanly.
+        Stop consumer worker thread cleanly.
         If drain is True, waits for remaining queued packets to finish processing.
         """
         if drain:
@@ -173,24 +167,21 @@ class PacketPipeline:
 
         self.stop_event.set()
 
-        # Enqueue stop tokens to unblock any waiting workers
-        for _ in self.workers:
+        # Enqueue stop token to unblock worker
+        if self.worker and self.worker.is_alive():
             try:
                 self.queue.put_nowait(STOP_TOKEN)
             except queue.Full:
                 pass
 
-        # Join worker threads
-        join_deadline = time.time() + timeout
-        for worker in self.workers:
+            join_deadline = time.time() + timeout
             remaining = max(0.1, join_deadline - time.time())
-            worker.join(timeout=remaining)
+            self.worker.join(timeout=remaining)
+            self.worker = None
 
         if self._stats_thread and self._stats_thread.is_alive():
             self._stats_thread.join(timeout=0.5)
             self._stats_thread = None
-
-        self.workers = []
 
     def get_snapshot(self) -> dict[str, Any]:
         """Return current metrics snapshot including current queue depth."""

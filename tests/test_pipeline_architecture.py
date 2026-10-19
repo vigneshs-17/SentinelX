@@ -54,7 +54,7 @@ class TestPipelineArchitecture:
         def dummy_processor(packet):
             processed_packets.append(packet)
 
-        pipeline = PacketPipeline(maxsize=50, worker_count=1, processor=dummy_processor)
+        pipeline = PacketPipeline(maxsize=50, processor=dummy_processor)
         pipeline.start()
 
         for port in range(5):
@@ -73,7 +73,7 @@ class TestPipelineArchitecture:
     def test_queue_full_drop_behavior(self):
         """Verify bounded queue rejects items when saturated and updates drop counter."""
         # Queue maxsize = 3, worker not started so queue fills up
-        pipeline = PacketPipeline(maxsize=3, worker_count=1)
+        pipeline = PacketPipeline(maxsize=3)
 
         results = []
         for port in range(6):
@@ -90,18 +90,18 @@ class TestPipelineArchitecture:
 
     def test_worker_clean_shutdown(self):
         """Verify worker threads terminate cleanly without hung processes."""
-        pipeline = PacketPipeline(maxsize=100, worker_count=2, processor=lambda p: time.sleep(0.01))
+        pipeline = PacketPipeline(maxsize=100, processor=lambda p: time.sleep(0.01))
         pipeline.start()
 
-        for worker in pipeline.workers:
-            assert worker.is_alive()
+        assert pipeline.worker is not None
+        assert pipeline.worker.is_alive()
 
         for port in range(10):
             pipeline.enqueue(make_test_packet(dport=port))
 
         pipeline.stop(drain=True, timeout=4.0)
 
-        assert len(pipeline.workers) == 0
+        assert pipeline.worker is None
         snap = pipeline.get_snapshot()
         assert snap["packets_processed"] == 10
 
@@ -114,7 +114,7 @@ class TestPipelineArchitecture:
                 raise ValueError("Corrupted packet payload!")
             processed_good.append(item)
 
-        pipeline = PacketPipeline(maxsize=20, worker_count=1, processor=brittle_processor)
+        pipeline = PacketPipeline(maxsize=20, processor=brittle_processor)
         pipeline.start()
 
         pipeline.enqueue(make_test_packet(80))
@@ -140,7 +140,7 @@ class TestPipelineArchitecture:
 
             from capture.packet_capture import process_packet
 
-            pipeline = PacketPipeline(maxsize=100, worker_count=1, processor=process_packet)
+            pipeline = PacketPipeline(maxsize=100, processor=process_packet)
 
             metrics = replay_pcap(str(pcap_file), pipeline_instance=pipeline, print_summary=False)
 

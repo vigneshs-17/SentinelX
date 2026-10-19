@@ -37,7 +37,7 @@ def test_performance_benchmark_queue_vs_synchronous():
     sync_duration = time.perf_counter() - sync_start
 
     # 2. Measure decoupled producer queue enqueue
-    pipeline = PacketPipeline(maxsize=10000, worker_count=1, processor=synchronous_handler)
+    pipeline = PacketPipeline(maxsize=10000, processor=synchronous_handler)
     pipeline.start()
 
     enqueue_start = time.perf_counter()

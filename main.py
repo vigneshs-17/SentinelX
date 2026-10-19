@@ -16,7 +16,6 @@ from config.settings import (
     CAPTURE_MODE,
     PCAP_FILE_PATH,
     QUEUE_MAXSIZE,
-    WORKER_COUNT,
 )
 from database.database import initialize_database
 
@@ -43,12 +42,6 @@ def parse_arguments():
         "--interface",
         default=CAPTURE_INTERFACE,
         help="Network interface to monitor in live mode (default: system default)",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=WORKER_COUNT,
-        help=f"Number of packet processing worker threads (default: {WORKER_COUNT})",
     )
     return parser.parse_args()
 
@@ -78,10 +71,7 @@ def main():
     print("[+] Dashboard available at:")
     print(f"[+] http://{API_HOST}:{API_PORT}/\n")
 
-    pipeline = PacketPipeline(
-        maxsize=QUEUE_MAXSIZE,
-        worker_count=args.workers,
-    )
+    pipeline = PacketPipeline(maxsize=QUEUE_MAXSIZE)
 
     if args.mode == "pcap":
         if not args.pcap:

@@ -1,21 +1,20 @@
 """
 Packet processor for SentinelX pipeline workers.
 
-Encapsulates packet parsing, multi-rule evaluation (D7), secondary ML confirmation,
-metrics recording on the active pipeline instance (D4), and persistence sink forwarding.
-All prints in the packet path are replaced with standard logging (D8).
+Encapsulates packet parsing, event-time DetectionEngine evaluation,
+secondary ML confirmation, metrics recording on the active pipeline instance,
+and persistence sink forwarding. All prints in the packet path are replaced
+with standard logging.
 """
 
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Any
 
 from capture.metrics import PipelineMetrics
 from capture.packet_parser import parse_packet
 from config.settings import SENSOR_ID
-from detection.rule_engine import detect_port_scan
-from detection.traffic_rules import detect_high_traffic
+from detection.engine import DetectionEngine
 from logs.alert_logger import log_alert
 from ml.predictor import predict_threat_with_confidence
 
@@ -25,7 +24,8 @@ logger = logging.getLogger("sentinelx.processor")
 class PacketProcessor:
     """
     Context-aware packet processor executed asynchronously by pipeline consumer workers.
-    Holds explicit references to the running pipeline's metrics and alert persistence sink.
+    Holds explicit references to the running pipeline's metrics, alert persistence sink,
+    and event-time DetectionEngine.
     """
 
     def __init__(
@@ -33,24 +33,34 @@ class PacketProcessor:
         metrics: PipelineMetrics | None = None,
         alert_sink: Callable[[dict[str, Any]], Any] | None = None,
         sensor_id: str | None = None,
+        engine: DetectionEngine | None = None,
+        config: dict[str, Any] | None = None,
     ):
         self.metrics = metrics or PipelineMetrics()
         self.alert_sink = alert_sink or log_alert
         self.sensor_id = sensor_id or SENSOR_ID
+        self.engine = engine or DetectionEngine(config=config)
 
     def process(self, packet: Any) -> list[dict[str, Any]]:
         """
         Process a single raw packet through the IDS processing pipeline:
         1. Parse network headers into normalized packet dictionary.
-        2. Evaluate all stateful rule detectors (both port scan and high traffic).
-        3. If one or more rules fire, perform secondary ML confirmation per alert.
-        4. Record alert metric on the active pipeline.
-        5. Persist each alert to SQLite and JSONL via alert_sink.
+        2. Validate event timestamp; skip packet and record parse error if missing (Correction 5).
+        3. Evaluate stateful rule detectors via DetectionEngine.
+        4. If alerts fire, perform secondary ML confirmation per alert.
+        5. Record alert metric on the active pipeline.
+        6. Persist each alert to SQLite and JSONL via alert_sink.
         """
         packet_data = parse_packet(packet)
 
+        # Correction 5: Skip packets missing a valid event timestamp
+        if packet_data.get("ts") is None:
+            self.metrics.record_parse_error()
+            return []
+
         logger.debug(
-            "Packet: %s:%s -> %s:%s | %s | %d bytes",
+            "Packet [ts=%.3f]: %s:%s -> %s:%s | %s | %d bytes",
+            packet_data["ts"],
             packet_data.get("source_ip"),
             packet_data.get("source_port"),
             packet_data.get("destination_ip"),
@@ -59,35 +69,23 @@ class PacketProcessor:
             packet_data.get("packet_size", 0),
         )
 
-        rule_alerts: list[dict[str, Any]] = []
-
-        # Evaluate port scan detector
-        if ps_alert := detect_port_scan(packet_data):
-            rule_alerts.append(ps_alert)
-
-        # Evaluate volumetric high traffic detector
-        if ht_alert := detect_high_traffic(packet_data):
-            rule_alerts.append(ht_alert)
-
+        rule_alerts = self.engine.process_packet(packet_data)
         if not rule_alerts:
             logger.debug("No rule-based threat detected for packet from %s", packet_data.get("source_ip"))
             return []
 
         generated_alerts: list[dict[str, Any]] = []
 
-        # Note: In Phase 2, detected_at is recorded as processing time (ISO-8601 UTC with offset).
-        # Phase 3 switches this to packet event time.
-        now_utc = datetime.now(UTC).isoformat(timespec="seconds")
-
-        for alert in rule_alerts:
+        for alert_obj in rule_alerts:
+            alert = alert_obj.to_dict()
             threat_type = alert["threat_type"]
             source_ip = alert.get("source_ip", packet_data.get("source_ip"))
 
             alert["sensor_id"] = self.sensor_id
-            alert["destination_ip"] = packet_data.get("destination_ip")
-            alert["protocol"] = packet_data.get("protocol")
-            alert["detected_at"] = now_utc
-            alert["timestamp"] = now_utc
+            if not alert.get("destination_ip"):
+                alert["destination_ip"] = packet_data.get("destination_ip")
+            if not alert.get("protocol"):
+                alert["protocol"] = packet_data.get("protocol")
 
             # Secondary ML Confirmation
             ml_prediction = None
@@ -121,7 +119,7 @@ class PacketProcessor:
                     source_ip,
                 )
 
-            # Record alert on the active pipeline instance (D4)
+            # Record alert on the active pipeline instance
             self.metrics.record_alert()
 
             # Forward alert to persistent sink (SQLite and JSONL)

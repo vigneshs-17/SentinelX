@@ -1,8 +1,11 @@
+from typing import Any
+
 from scapy.all import IP, TCP, UDP, IPv6
 
 
-def parse_packet(packet):
-    packet_data = {
+def parse_packet(packet: Any) -> dict[str, Any]:
+    packet_data: dict[str, Any] = {
+        "ts": None,
         "source_ip": None,
         "destination_ip": None,
         "protocol": "OTHER",
@@ -10,10 +13,23 @@ def parse_packet(packet):
         "destination_port": None,
         "packet_size": 0,
         "tcp_syn": False,
+        "tcp_ack": False,
+        "tcp_syn_ack": False,
+        "tcp_rst": False,
+        "tcp_fin": False,
+        "tcp_flags": 0,
     }
 
     if packet is None:
         return packet_data
+
+    # Extract event timestamp (packet.time)
+    try:
+        ts_val = getattr(packet, "time", None)
+        if ts_val is not None:
+            packet_data["ts"] = float(ts_val)
+    except (TypeError, ValueError):
+        packet_data["ts"] = None
 
     # Safely extract packet_size if packet supports len()
     try:
@@ -44,11 +60,22 @@ def parse_packet(packet):
         packet_data["source_port"] = packet[TCP].sport
         packet_data["destination_port"] = packet[TCP].dport
 
-        # Detect TCP SYN packets without ACK
-        tcp_flags = int(packet[TCP].flags)
+        try:
+            tcp_flags = int(packet[TCP].flags)
+        except (TypeError, ValueError, AttributeError):
+            tcp_flags = 0
 
-        if (tcp_flags & 0x02) and not (tcp_flags & 0x10):
-            packet_data["tcp_syn"] = True
+        packet_data["tcp_flags"] = tcp_flags
+        is_syn = bool(tcp_flags & 0x02)
+        is_ack = bool(tcp_flags & 0x10)
+        is_rst = bool(tcp_flags & 0x04)
+        is_fin = bool(tcp_flags & 0x01)
+
+        packet_data["tcp_syn"] = is_syn and not is_ack
+        packet_data["tcp_ack"] = is_ack and not is_syn
+        packet_data["tcp_syn_ack"] = is_syn and is_ack
+        packet_data["tcp_rst"] = is_rst
+        packet_data["tcp_fin"] = is_fin
 
     elif UDP in packet:
         packet_data["protocol"] = "UDP"

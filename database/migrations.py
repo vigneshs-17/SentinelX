@@ -11,7 +11,7 @@ from datetime import UTC, datetime, tzinfo
 
 logger = logging.getLogger("sentinelx.migrations")
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 def convert_legacy_timestamp_to_utc(ts_str: str, local_tz: tzinfo | None = None) -> str:
@@ -71,10 +71,6 @@ def migration_2(conn: sqlite3.Connection, local_tz: tzinfo | None = None) -> Non
     This migration backfills detected_at by interpreting existing naive timestamps
     as local time (per-timestamp local rules or explicit local_tz) and converting
     them to timezone-aware ISO-8601 UTC strings with +00:00 offset.
-
-    Note on detected_at:
-    In Phase 2, detected_at is recorded as processing time (ISO-8601 UTC with offset).
-    Phase 3 switches this to packet event time.
     """
     logger.info("Applying migration 2: v2 schema columns and indexes")
     cursor = conn.cursor()
@@ -115,6 +111,14 @@ def migration_2(conn: sqlite3.Connection, local_tz: tzinfo | None = None) -> Non
         conn.execute("UPDATE alerts SET detected_at = ? WHERE id = ?;", (utc_ts, alert_id))
 
 
+def migration_3(conn: sqlite3.Connection) -> None:
+    """
+    Migration 3: Rename HIGH_TRAFFIC threat_type to canonical VOLUMETRIC.
+    """
+    logger.info("Applying migration 3: rename HIGH_TRAFFIC to VOLUMETRIC")
+    conn.execute("UPDATE alerts SET threat_type = 'VOLUMETRIC' WHERE threat_type = 'HIGH_TRAFFIC';")
+
+
 def apply_migrations(conn: sqlite3.Connection, local_tz: tzinfo | None = None) -> int:
     """
     Idempotently inspects database PRAGMA user_version and applies all pending
@@ -138,5 +142,12 @@ def apply_migrations(conn: sqlite3.Connection, local_tz: tzinfo | None = None) -
             conn.execute("PRAGMA user_version = 2;")
         current_version = 2
         logger.info("Database upgraded to user_version=2")
+
+    if current_version < 3:
+        with conn:
+            migration_3(conn)
+            conn.execute("PRAGMA user_version = 3;")
+        current_version = 3
+        logger.info("Database upgraded to user_version=3")
 
     return current_version

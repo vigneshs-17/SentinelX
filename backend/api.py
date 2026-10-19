@@ -13,8 +13,9 @@ from config.settings import (
     API_PORT,
     CANONICAL_THREAT_TYPES,
     CORS_ALLOWED_ORIGINS,
-    THREAT_TYPE_HIGH_TRAFFIC,
     THREAT_TYPE_PORT_SCAN,
+    THREAT_TYPE_SYN_FLOOD,
+    THREAT_TYPE_VOLUMETRIC,
 )
 from database.database import get_connection, initialize_database
 
@@ -93,9 +94,12 @@ def parse_alert_query_params() -> tuple[
         if offset < 0:
             return None, None, None, None, None, None, "Parameter 'offset' cannot be negative."
 
-    if threat_type and threat_type not in CANONICAL_THREAT_TYPES:
-        allowed = ", ".join(CANONICAL_THREAT_TYPES)
-        return None, None, None, None, None, None, f"Invalid parameter 'threat_type': must be one of [{allowed}]."
+    if threat_type:
+        if threat_type == "HIGH_TRAFFIC":
+            threat_type = "VOLUMETRIC"
+        if threat_type not in CANONICAL_THREAT_TYPES:
+            allowed = ", ".join(CANONICAL_THREAT_TYPES)
+            return None, None, None, None, None, None, f"Invalid parameter 'threat_type': must be one of [{allowed}]."
 
     valid_severities = ("HIGH", "MEDIUM", "LOW")
     if severity and severity.upper() not in valid_severities:
@@ -360,14 +364,17 @@ def get_stats():
         connection.close()
 
     port_scans = threat_counts.get(THREAT_TYPE_PORT_SCAN, 0)
-    high_traffic = threat_counts.get(THREAT_TYPE_HIGH_TRAFFIC, 0)
+    syn_floods = threat_counts.get(THREAT_TYPE_SYN_FLOOD, 0)
+    volumetric = threat_counts.get(THREAT_TYPE_VOLUMETRIC, 0) + threat_counts.get("HIGH_TRAFFIC", 0)
 
     return jsonify(
         {
             "total_alerts": total_alerts,
             "high_severity": high_severity,
             "port_scans": port_scans,
-            "high_traffic": high_traffic,
+            "syn_floods": syn_floods,
+            "volumetric": volumetric,
+            "high_traffic": volumetric,
         }
     ), 200
 
