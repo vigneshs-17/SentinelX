@@ -13,6 +13,8 @@ htmlcov/
 
 # Local data
 data/
+eval_output/
+*.pcap
 
 # Databases
 database/*.db

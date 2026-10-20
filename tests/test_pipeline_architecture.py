@@ -10,10 +10,6 @@ from capture.metrics import PipelineMetrics
 from capture.pcap_replay import replay_pcap
 from capture.pipeline import PacketPipeline
 from database.database import get_connection
-from detection.rule_engine import (
-    connection_tracker,
-    last_scan_alert_time,
-)
 from logs.alert_logger import get_alert_file_path, log_alert
 
 
@@ -130,9 +126,6 @@ class TestPipelineArchitecture:
 
     def test_pcap_replay_mode_synthetic(self):
         """Verify offline PCAP replay processes packets and triggers detection."""
-        connection_tracker.clear()
-        last_scan_alert_time.clear()
-
         with tempfile.TemporaryDirectory() as temp_dir:
             pcap_file = Path(temp_dir) / "test_syn_scan.pcap"
             packets = [make_test_packet(dport=p, flags="S") for p in range(20, 32)]

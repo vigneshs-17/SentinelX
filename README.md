@@ -293,9 +293,12 @@ SentinelX/
 │   ├── database.py           # Database connection management and schema migration
 │   └── sentinelx.db          # Production alert database
 ├── detection/                # Stateful detection engines
-│   ├── flow_tracker.py       # Thread-safe session tracking, TTL cleanup, LRU eviction
-│   ├── rule_engine.py        # Vertical and horizontal TCP SYN port scan rules
-│   └── traffic_rules.py      # Volumetric packet, rate, and byte anomaly rules
+│   ├── engine.py             # Central DetectionEngine orchestrating all detectors
+│   ├── state_store.py        # Partitioned BoundedStateStore with LRU & event TTL
+│   ├── alert.py              # Strongly-typed Alert dataclass
+│   ├── utils.py              # Deterministic network & IP utilities
+│   ├── scoring.py            # Alert severity and confidence scoring
+│   └── detectors/            # Modular stateful detectors (port scan, slow scan, syn flood, volumetric)
 ├── logs/                     # Alert persistence
 │   ├── alert_logger.py       # Append-only JSONL logger with automatic rotation
 │   └── alerts.json           # Legacy alert log

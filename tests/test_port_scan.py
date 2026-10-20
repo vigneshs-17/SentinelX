@@ -242,11 +242,11 @@ def test_port_scan_cooldown_concurrency():
     t2.join()
 
     assert len(errors) == 0
-    # Exactly 1 VERTICAL alert and 1 SLOW_VERTICAL alert emitted, subsequent suppressed by cooldown
+    # Exactly 1 VERTICAL alert emitted, slow scan duplicate suppressed by fast scan cooldown
     vertical_alerts = [a for a in alerts if a.scan_type == "VERTICAL"]
     assert len(vertical_alerts) == 1
     slow_alerts = [a for a in alerts if a.scan_type == "SLOW_VERTICAL"]
-    assert len(slow_alerts) == 1
+    assert len(slow_alerts) == 0
 
 
 def test_state_store_cleanup_and_bounding_concurrency():

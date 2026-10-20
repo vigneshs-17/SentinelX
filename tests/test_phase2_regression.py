@@ -39,9 +39,7 @@ from database.database import (
 )
 from database.migrations import apply_migrations
 from detection.scoring import calculate_confidence, calculate_severity
-from detection.traffic_rules import (
-    is_multicast_or_broadcast,
-)
+from detection.utils import is_multicast_or_broadcast
 
 
 @pytest.fixture

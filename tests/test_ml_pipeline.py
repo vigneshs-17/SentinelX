@@ -4,8 +4,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from detection.rule_engine import detect_port_scan
-from detection.traffic_rules import detect_high_traffic
+from detection.engine import DetectionEngine
 from ml.evaluation.metrics import (
     compute_comprehensive_metrics,
     format_confusion_matrix_ascii,
@@ -243,6 +242,7 @@ class TestMLPipeline:
         is completely gated by the Phase 3 rule engine, resulting in zero false alerts.
         """
         benign_packet = {
+            "ts": 1000.0,
             "source_ip": "192.168.1.50",
             "destination_ip": "192.168.1.1",
             "source_port": 54321,
@@ -252,13 +252,12 @@ class TestMLPipeline:
             "packet_size": 1400,
         }
 
-        # Rule engine checks
-        rule_scan = detect_port_scan(benign_packet)
-        rule_traffic = detect_high_traffic(benign_packet)
+        # Detection engine check
+        engine = DetectionEngine()
+        alerts = engine.process_packet(benign_packet)
 
-        # Neither rule should fire on a single packet
-        assert rule_scan is None
-        assert rule_traffic is None
+        # Engine should fire zero alerts on a single packet
+        assert len(alerts) == 0
 
         # Therefore, even if ML output is inspected, the hybrid system emits zero alerts
         # This demonstrates why the Phase 3 rule engine is the primary gating tier

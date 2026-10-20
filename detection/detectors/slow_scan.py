@@ -80,7 +80,10 @@ class SlowScanDetector(BaseDetector):
         v_port_count = len(v_ports)
         if v_port_count >= self.threshold:
             cooldown_key = ("SLOW_VERTICAL", source_ip, destination_ip)
-            if not self.is_in_cooldown(cooldown_key, event_time, self.cooldown):
+            is_fast_active = self.is_in_cooldown(
+                ("VERTICAL", source_ip, destination_ip), event_time, 60.0
+            ) or self.is_in_cooldown(("VERTICAL", source_ip), event_time, 60.0)
+            if not is_fast_active and not self.is_in_cooldown(cooldown_key, event_time, self.cooldown):
                 self.record_cooldown(cooldown_key, event_time)
                 self.record_cooldown(("SLOW_VERTICAL", source_ip), event_time)
 
@@ -143,7 +146,10 @@ class SlowScanDetector(BaseDetector):
         h_target_count = len(h_targets)
         if h_target_count >= self.threshold:
             cooldown_key = ("SLOW_HORIZONTAL", source_ip, destination_port)
-            if not self.is_in_cooldown(cooldown_key, event_time, self.cooldown):
+            is_fast_active = self.is_in_cooldown(
+                ("HORIZONTAL", source_ip, destination_port), event_time, 60.0
+            ) or self.is_in_cooldown(("HORIZONTAL", source_ip), event_time, 60.0)
+            if not is_fast_active and not self.is_in_cooldown(cooldown_key, event_time, self.cooldown):
                 self.record_cooldown(cooldown_key, event_time)
                 self.record_cooldown(("SLOW_HORIZONTAL", source_ip), event_time)
 

@@ -39,6 +39,7 @@ files = [
     "config",
     "database",
     "detection",
+    "eval",
     "logs",
     "ml",
     "main.py",
