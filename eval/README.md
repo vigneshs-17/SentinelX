@@ -6,7 +6,7 @@ This module provides a deterministic, seeded synthetic traffic generator and aut
 > **Synthetic Regression Harness Notice:**
 > The scenario suite in `eval/` is a regression net on deterministic synthetic traffic designed to enforce that detectors, time windows, state stores, and eviction mechanisms function correctly across builds and in CI.
 >
-> This benchmark is **NOT a real-world accuracy claim**. Synthetic scenarios with known traffic models do not represent the full complexity, noise, and evasion techniques found in real operational enterprise or carrier networks. Real-world precision, recall, and detection accuracy are evaluated separately on external labelled PCAP datasets (e.g. CIC-IDS, UNSW-NB15) in Phase 5.
+> This benchmark is **NOT a real-world accuracy claim**. Synthetic scenarios with known traffic models do not represent the full complexity, noise, and evasion techniques found in real operational enterprise or carrier networks. Real-world precision, recall, and detection accuracy are evaluated separately on external labelled PCAP datasets (e.g. CIC-IDS, UNSW-NB15) in Phase 5 (see docs/ML_REPORT.md).
 
 ---
 

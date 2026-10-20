@@ -15,6 +15,15 @@ htmlcov/
 data/
 eval_output/
 *.pcap
+*.pcapng
+
+# ML build outputs (never committed: datasets, flow tables, signed model artifacts)
+flows*.csv.gz
+flows*.csv.gz.meta.json
+models/
+*.skops
+*.skops.sig
+.serena/
 
 # Databases
 database/*.db

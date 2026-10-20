@@ -10,10 +10,13 @@ THREAT_TYPE_PORT_SCAN = "PORT_SCAN"
 THREAT_TYPE_SYN_FLOOD = "SYN_FLOOD"
 THREAT_TYPE_VOLUMETRIC = "VOLUMETRIC"
 
+THREAT_TYPE_ML_ANOMALY = "ML_ANOMALY"  # only ever raised by the optional, gated flow model (SENTINELX_ML=on)
+
 CANONICAL_THREAT_TYPES = (
     THREAT_TYPE_PORT_SCAN,
     THREAT_TYPE_SYN_FLOOD,
     THREAT_TYPE_VOLUMETRIC,
+    THREAT_TYPE_ML_ANOMALY,
 )
 
 # Scan Types
@@ -31,6 +34,8 @@ PARTITION_CAP_SYN_FLOOD_AGGREGATES = int(os.getenv("SENTINELX_CAP_SYN_FLOOD_AGGR
 PARTITION_CAP_SYN_FLOOD_HALF_OPEN = int(os.getenv("SENTINELX_CAP_SYN_FLOOD_HALF_OPEN", "10000"))
 PARTITION_CAP_VOLUMETRIC = int(os.getenv("SENTINELX_CAP_VOLUMETRIC", "1000"))
 PARTITION_CAP_COOLDOWNS = int(os.getenv("SENTINELX_CAP_COOLDOWNS", "1000"))
+PARTITION_CAP_FLOWS = int(os.getenv("SENTINELX_CAP_FLOWS", "50000"))
+PARTITION_CAP_FLOW_SOURCES = int(os.getenv("SENTINELX_CAP_FLOW_SOURCES", "5000"))
 
 MAX_TRACKED_ENTRIES = int(
     os.getenv(
@@ -88,7 +93,12 @@ PCAP_FILE_PATH = os.getenv("SENTINELX_PCAP_PATH", None)
 QUEUE_MAXSIZE = int(os.getenv("SENTINELX_QUEUE_SIZE", "10000"))
 QUEUE_TIMEOUT = float(os.getenv("SENTINELX_QUEUE_TIMEOUT", "0.5"))
 LOG_LEVEL = os.getenv("SENTINELX_LOG_LEVEL", "INFO")
-ML_ALERT_COOLDOWN = int(os.getenv("SENTINELX_ML_ALERT_COOLDOWN", "30"))
+ML_ALERT_COOLDOWN = float(os.getenv("SENTINELX_ML_ALERT_COOLDOWN", "30"))
+# Flow extraction (shared by ML training and serving)
+FLOW_ACTIVE_TIMEOUT = float(os.getenv("SENTINELX_FLOW_ACTIVE_TIMEOUT", "120.0"))
+FLOW_IDLE_TIMEOUT = float(os.getenv("SENTINELX_FLOW_IDLE_TIMEOUT", "15.0"))
+# ML runtime role: off unless SENTINELX_ML=on, and even then only with a verified model + passing gate.
+ML_MODEL_DIR = os.getenv("SENTINELX_ML_MODEL_DIR", "models")
 
 # Backend & REST API Configuration
 API_HOST = os.getenv("SENTINELX_API_HOST", "127.0.0.1")
@@ -134,6 +144,8 @@ def validate_config(config_dict: dict[str, Any] | None = None) -> None:
         "PARTITION_CAP_SYN_FLOOD_HALF_OPEN",
         "PARTITION_CAP_VOLUMETRIC",
         "PARTITION_CAP_COOLDOWNS",
+        "PARTITION_CAP_FLOWS",
+        "PARTITION_CAP_FLOW_SOURCES",
         "VOLUMETRIC_WARMUP_WINDOWS",
         "VOLUMETRIC_MIN_PACKETS",
         "VOLUMETRIC_TOP_TALKERS_MAX",
@@ -157,6 +169,8 @@ def validate_config(config_dict: dict[str, Any] | None = None) -> None:
         "VOLUMETRIC_MULTIPLIER_K",
         "VOLUMETRIC_ALERT_COOLDOWN",
         "DETECTION_STATE_TTL",
+        "FLOW_ACTIVE_TIMEOUT",
+        "FLOW_IDLE_TIMEOUT",
     ]
     for key in positive_float_keys:
         val = cfg.get(key)

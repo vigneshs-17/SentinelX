@@ -5,7 +5,7 @@ exclude_dirs:
   - ".venv"
 
 # Skipped checks with engineering justification:
-# - B311: Standard random generator is used solely for synthetic dataset generation in ml/data/create_dataset.py (file slated for removal in Phase 5).
+# - B311: Standard random generator is used solely for deterministic synthetic scenario generation in eval/scenarios.py.
 # Note: B104 and B608 are addressed via line-level # nosec comments; B110 try/except/pass blocks are eliminated in code.
 skips:
   - "B311"

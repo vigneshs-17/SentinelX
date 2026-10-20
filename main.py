@@ -3,7 +3,8 @@ SentinelX Intrusion Detection System - Main Entry Point.
 Provides CLI subcommands:
   - run: Live packet capture and monitoring
   - replay: Offline PCAP replay
-  - eval: Automated scenario evaluation benchmark and reporting
+  - eval: Automated scenario evaluation benchmark and reporting (optionally rules-only vs rules+ML replay)
+  - train: Train the flow-level ML model from a flows.csv.gz and write a signed model artifact
 """
 
 from __future__ import annotations
@@ -28,7 +29,10 @@ from config.settings import (
     QUEUE_MAXSIZE,
 )
 from database.database import initialize_database
+from eval.ml_compare import run_ml_comparison
 from eval.runner import run_external_pcap_benchmark, run_scenario_benchmark
+from ml.artifact import ModelSecurityError
+from ml.model import TrainingError, train_from_flows
 
 
 def start_dashboard() -> None:
@@ -73,8 +77,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser_eval.add_argument(
         "--pcap",
+        nargs="+",
         default=None,
-        help="Path to external labelled PCAP file",
+        help="Path(s) to external labelled PCAP file(s)",
+    )
+    parser_eval.add_argument(
+        "--ml-model",
+        default=None,
+        help="Model directory: replay --pcap through rules-only and rules+ML, score both, decide the gate",
     )
     parser_eval.add_argument(
         "--labels",
@@ -86,6 +96,24 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=42,
         help="Random seed for deterministic scenario generation (default: 42)",
+    )
+
+    # 4. train subcommand
+    parser_train = subparsers.add_parser("train", help="Train the flow-level ML model (needs SENTINELX_MODEL_KEY)")
+    parser_train.add_argument("--flows", required=True, help="flows.csv.gz produced by scripts/build_flows.py")
+    parser_train.add_argument("--out", default="models", help="Output model directory (default: models)")
+    parser_train.add_argument("--schedule", default=None, help="Attack schedule JSON (default: CIC-IDS2017)")
+    parser_train.add_argument("--utc-offset-hours", type=float, default=None)
+    parser_train.add_argument(
+        "--short-class-policy",
+        choices=["test", "train"],
+        default="test",
+        help="Single-day classes too short to split: hold out as zero-shot test (default) or train on them",
+    )
+    parser_train.add_argument(
+        "--smoke",
+        action="store_true",
+        help="CI only: fit on all rows of a tiny synthetic flow set; no held-out claims, never gate-eligible",
     )
 
     # Legacy options for backward compatibility
@@ -112,9 +140,26 @@ def handle_eval(args: argparse.Namespace) -> None:
     print("        SENTINELX EVALUATION BENCHMARK")
     print("=" * 60)
 
+    if args.ml_model:
+        if not (args.pcap and args.labels):
+            print("[!] --ml-model needs --pcap and --labels.")
+            sys.exit(2)
+        try:
+            ml_summary = run_ml_comparison(args.pcap, args.labels, args.ml_model, args.out)
+        except (ModelSecurityError, FileNotFoundError, ValueError) as exc:
+            print(f"[!] ML comparison failed: {exc}")
+            sys.exit(2)
+        gate = ml_summary["gate"]
+        print(f"[+] Gate: {gate['decision']} - {gate['reason']}")
+        print(f"[+] Wrote {Path(args.out) / 'ml_eval.json'}")
+        sys.exit(0)
+
     if args.pcap and args.labels:
+        if len(args.pcap) != 1:
+            print("[!] Multiple --pcap files need --ml-model.")
+            sys.exit(2)
         summary = run_external_pcap_benchmark(
-            pcap_path=args.pcap,
+            pcap_path=args.pcap[0],
             labels_path=args.labels,
             out_dir=args.out,
         )
@@ -138,6 +183,20 @@ def handle_eval(args: argparse.Namespace) -> None:
         sys.exit(0)
 
 
+def handle_train(args: argparse.Namespace) -> None:
+    """Executes the train subcommand."""
+    kwargs = {"utc_offset_hours": args.utc_offset_hours, "short_class_policy": args.short_class_policy}
+    if args.schedule:
+        kwargs["schedule_path"] = args.schedule
+    try:
+        report = train_from_flows(args.flows, args.out, smoke=args.smoke, **kwargs)
+    except (ModelSecurityError, TrainingError, FileNotFoundError) as exc:
+        print(f"[!] Training failed: {exc}")
+        sys.exit(2)
+    print(f"[+] Trained ({report['mode']}) on {report['total_flows']:,} flows in {report['wall_clock_seconds']:.1f}s")
+    print(f"[+] Model + signature + train_report.json written to {args.out}")
+
+
 def main() -> None:
     """Main CLI execution router."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -149,6 +208,9 @@ def main() -> None:
 
     if args.command == "eval":
         handle_eval(args)
+        return
+    if args.command == "train":
+        handle_train(args)
         return
 
     # Configure centralized logging and database schema for live/replay runs

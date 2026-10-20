@@ -7,6 +7,7 @@ by isolating tracking tables into capped, independent partitions (Correction 1).
 
 import threading
 from collections import OrderedDict
+from collections.abc import Callable
 from typing import Any
 
 
@@ -16,11 +17,12 @@ class BoundedStateStore[T]:
     and deterministic event-time TTL pruning.
     """
 
-    def __init__(self, name: str, max_entries: int):
+    def __init__(self, name: str, max_entries: int, on_evict: Callable[[Any, T], None] | None = None):
         if max_entries <= 0:
             raise ValueError(f"max_entries must be positive, got {max_entries}")
         self.name = name
         self.max_entries = max_entries
+        self.on_evict = on_evict
         self._store: OrderedDict[Any, T] = OrderedDict()
         self._lock = threading.RLock()
         self.evictions = 0
@@ -54,8 +56,10 @@ class BoundedStateStore[T]:
                 return
 
             if len(self._store) >= self.max_entries:
-                self._store.popitem(last=False)
+                evicted_key, evicted_value = self._store.popitem(last=False)
                 self.evictions += 1
+                if self.on_evict is not None:
+                    self.on_evict(evicted_key, evicted_value)
 
             self._store[key] = value
 
@@ -94,6 +98,26 @@ class BoundedStateStore[T]:
                 self._store.pop(key, None)
 
             return len(expired_keys)
+
+    def pop_expired_front(self, cutoff_time: float, get_last_seen: Callable[[T], float]) -> list[tuple[Any, T]]:
+        """
+        Pop entries from the LRU end while their last_seen is strictly below cutoff_time, stopping at the
+        first live entry. Valid when every update goes through put() (LRU order == last-update order).
+        Cost is O(expired), not O(size).
+        """
+        popped: list[tuple[Any, T]] = []
+        with self._lock:
+            while self._store:
+                key = next(iter(self._store))
+                if get_last_seen(self._store[key]) >= cutoff_time:
+                    break
+                popped.append((key, self._store.pop(key)))
+        return popped
+
+    def items_snapshot(self) -> list[tuple[Any, T]]:
+        """Return entries in LRU order (oldest first) without touching recency."""
+        with self._lock:
+            return list(self._store.items())
 
     def get_metrics(self) -> dict[str, int]:
         """Return snapshot of store health metrics."""

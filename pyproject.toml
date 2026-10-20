@@ -51,6 +51,7 @@ module = [
     "joblib.*",
     "sklearn.*",
     "pandas.*",
+    "skops.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

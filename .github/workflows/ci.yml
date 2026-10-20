@@ -59,7 +59,7 @@ jobs:
 
       - name: Run Bandit static application security testing
         run: |
-          bandit -c bandit.yaml -r backend capture config database detection eval logs ml main.py
+          bandit -c bandit.yaml -r backend capture config database detection eval logs ml scripts main.py
 
       - name: Run Pip-audit dependency vulnerability scan
         run: |
@@ -112,6 +112,14 @@ jobs:
       - name: Run detection evaluation benchmark
         run: |
           python main.py eval --scenarios all --out eval_output
+
+      - name: ML code-path smoke (tiny model on Phase 4 scenario flows; no accuracy claim)
+        env:
+          SENTINELX_MODEL_KEY: ci-only-throwaway-key-not-a-secret-0001
+        run: |
+          python scripts/build_flows.py --from-scenarios benign_web_browsing,benign_lan_noise,fast_vertical_scan,horizontal_sweep,slow_scan,syn_flood_spoofed --out ci_flows.csv.gz
+          python main.py train --flows ci_flows.csv.gz --out ci_models --smoke
+          python scripts/gen_ml_report.py --train ci_models/train_report.json --meta ci_flows.csv.gz.meta.json --out eval_output/ml_smoke_report.md --dataset-doc ""
 
       - name: Publish benchmark report to Step Summary
         if: always()

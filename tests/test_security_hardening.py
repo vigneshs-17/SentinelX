@@ -1,9 +1,7 @@
-import hashlib
 import json
 import tempfile
 import threading
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from scapy.all import ARP, IP, TCP, UDP, Ether, IPv6
@@ -14,13 +12,6 @@ from logs.alert_logger import (
     log_alert,
     read_alerts,
 )
-from ml.predictor import (
-    MODEL_PATH,
-    ModelIntegrityError,
-    calculate_model_sha256,
-    get_model,
-    verify_model_integrity,
-)
 
 
 @pytest.fixture
@@ -28,93 +19,6 @@ def temp_dir():
     """Windows-safe temporary directory fixture avoiding pytest-of-user permission collisions."""
     with tempfile.TemporaryDirectory(prefix="sentinelx_sec_") as d:
         yield Path(d)
-
-
-# =============================================================================
-# 1. P0 — ML Model Integrity Verification Tests
-# =============================================================================
-
-
-class TestMLModelIntegrity:
-    """Tests for cryptographic checksum verification of ML models."""
-
-    def test_production_model_sha256_matches_metadata(self):
-        """Verify the production sentinelx_model.pkl matches model_metadata.json."""
-        meta_path = MODEL_PATH.parent / "model_metadata.json"
-        assert meta_path.exists(), "model_metadata.json must exist"
-        with open(meta_path, encoding="utf-8") as f:
-            metadata = json.load(f)
-
-        expected_hash = metadata.get("model_sha256")
-        assert expected_hash is not None, "metadata must contain model_sha256"
-        actual_hash = calculate_model_sha256(MODEL_PATH)
-        assert actual_hash.lower() == expected_hash.lower()
-
-        # verify_model_integrity should succeed without error
-        verified = verify_model_integrity(MODEL_PATH)
-        assert verified == expected_hash.lower()
-
-    def test_tampered_model_raises_integrity_error(self, temp_dir):
-        """Verify that any bit alteration in the model file raises ModelIntegrityError."""
-        fake_model = temp_dir / "tampered_model.pkl"
-        fake_meta = temp_dir / "model_metadata.json"
-
-        fake_model.write_bytes(b"LEGITIMATE_MODEL_CONTENT_12345")
-        correct_hash = hashlib.sha256(b"LEGITIMATE_MODEL_CONTENT_12345").hexdigest()
-        fake_meta.write_text(json.dumps({"model_sha256": correct_hash}), encoding="utf-8")
-
-        # Verify legitimate state passes
-        assert verify_model_integrity(fake_model, fake_meta) == correct_hash
-
-        # Tamper with the model file
-        fake_model.write_bytes(b"TAMPERED_MALICIOUS_PAYLOAD_67890")
-
-        with pytest.raises(ModelIntegrityError, match="integrity verification failed"):
-            verify_model_integrity(fake_model, fake_meta)
-
-    def test_missing_metadata_raises_integrity_error(self, temp_dir):
-        """Verify that missing metadata raises ModelIntegrityError."""
-        model_file = temp_dir / "model.pkl"
-        model_file.write_bytes(b"some_model_data")
-        missing_meta = temp_dir / "non_existent_metadata.json"
-
-        with pytest.raises(ModelIntegrityError, match="metadata file missing"):
-            verify_model_integrity(model_file, missing_meta)
-
-    def test_malformed_metadata_json_raises_integrity_error(self, temp_dir):
-        """Verify that malformed metadata JSON raises ModelIntegrityError."""
-        model_file = temp_dir / "model.pkl"
-        model_file.write_bytes(b"some_model_data")
-        bad_meta = temp_dir / "model_metadata.json"
-        bad_meta.write_text("{ NOT_VALID_JSON }", encoding="utf-8")
-
-        with pytest.raises(ModelIntegrityError, match="Malformed model metadata"):
-            verify_model_integrity(model_file, bad_meta)
-
-    def test_missing_sha256_field_in_metadata_raises_integrity_error(self, temp_dir):
-        """Verify that metadata missing model_sha256 field raises ModelIntegrityError."""
-        model_file = temp_dir / "model.pkl"
-        model_file.write_bytes(b"some_model_data")
-        bad_meta = temp_dir / "model_metadata.json"
-        bad_meta.write_text(json.dumps({"model_version": "2.0.0"}), encoding="utf-8")
-
-        with pytest.raises(ModelIntegrityError, match="Missing 'model_sha256'"):
-            verify_model_integrity(model_file, bad_meta)
-
-    def test_joblib_load_never_called_when_checksum_fails(self, temp_dir):
-        """Verify that joblib.load is NEVER invoked if the checksum check fails."""
-        fake_model = temp_dir / "tampered.pkl"
-        fake_meta = temp_dir / "model_metadata.json"
-        fake_model.write_bytes(b"TAMPERED")
-        fake_meta.write_text(
-            json.dumps({"model_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}),
-            encoding="utf-8",
-        )
-
-        with patch("joblib.load") as mock_joblib:
-            with pytest.raises(ModelIntegrityError):
-                get_model(custom_path=fake_model, metadata_path=fake_meta)
-            mock_joblib.assert_not_called()
 
 
 # =============================================================================
