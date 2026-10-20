@@ -1,6 +1,7 @@
 """Audit findings N1-N8: ingest-time retention, read-only API, login lockout, session/audit/triage housekeeping."""
 
 import logging
+import os
 import re
 import shutil
 import sqlite3
@@ -131,8 +132,6 @@ def test_live_start_runs_retention_thread_and_replay_does_not():
 def locked_dir(path: Path):
     """Make a directory refuse new files (what a read-only Docker volume does); restore on exit."""
     if sys.platform == "win32":
-        import os
-
         user = os.environ["USERNAME"]
         subprocess.run(["icacls", str(path), "/deny", f"{user}:(WD,AD,DC)"], check=True, capture_output=True)
         try:
@@ -166,6 +165,10 @@ def readonly_copy_of_cleanly_closed_wal_db(tmp_path: Path) -> Path:
     return dest
 
 
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root ignores directory permissions, so chmod cannot make the directory read-only",
+)
 def test_old_readonly_open_failed_on_a_readonly_copy_and_the_new_one_reads_but_cannot_write(tmp_path):
     dest = readonly_copy_of_cleanly_closed_wal_db(tmp_path)
     with locked_dir(dest.parent):
