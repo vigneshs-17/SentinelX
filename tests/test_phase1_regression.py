@@ -5,8 +5,8 @@ from pathlib import Path
 from backend.api import app
 from config.settings import (
     CANONICAL_THREAT_TYPES,
-    THREAT_TYPE_HIGH_TRAFFIC,
     THREAT_TYPE_PORT_SCAN,
+    THREAT_TYPE_VOLUMETRIC,
 )
 from database.database import (
     get_connection,
@@ -104,7 +104,7 @@ class TestPhase1Regression:
         insert_alert(
             {
                 "timestamp": "2026-09-11T12:00:02",
-                "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+                "threat_type": THREAT_TYPE_VOLUMETRIC,
                 "severity": "HIGH",
                 "source_ip": "192.168.1.60",
                 "destination_ip": "192.168.1.1",
@@ -125,7 +125,7 @@ class TestPhase1Regression:
 
         # Verify CANONICAL_THREAT_TYPES
         assert THREAT_TYPE_PORT_SCAN in CANONICAL_THREAT_TYPES
-        assert THREAT_TYPE_HIGH_TRAFFIC in CANONICAL_THREAT_TYPES
+        assert THREAT_TYPE_VOLUMETRIC in CANONICAL_THREAT_TYPES
         assert "ML_PORT_SCAN" not in CANONICAL_THREAT_TYPES
         assert "ML_HIGH_TRAFFIC" not in CANONICAL_THREAT_TYPES
 

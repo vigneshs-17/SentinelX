@@ -28,8 +28,8 @@ from capture.pcap_replay import replay_pcap
 from capture.pipeline import PacketPipeline
 from capture.processor import PacketProcessor
 from config.settings import (
-    THREAT_TYPE_HIGH_TRAFFIC,
     THREAT_TYPE_PORT_SCAN,
+    THREAT_TYPE_VOLUMETRIC,
 )
 from database.database import (
     close_database,
@@ -378,7 +378,7 @@ def test_packet_triggering_both_detectors_stores_two_alerts(monkeypatch):
         message="Vertical scan mock",
     )
     dummy_ht_alert = Alert(
-        threat_type=THREAT_TYPE_HIGH_TRAFFIC,
+        threat_type=THREAT_TYPE_VOLUMETRIC,
         scan_type=None,
         severity="HIGH",
         confidence=0.95,
@@ -388,7 +388,7 @@ def test_packet_triggering_both_detectors_stores_two_alerts(monkeypatch):
         source_ip="172.16.0.50",
         destination_ip="172.16.0.1",
         evidence={"pps": 500},
-        message="High traffic mock",
+        message="Volumetric mock",
     )
 
     class MockEngine:
@@ -402,7 +402,7 @@ def test_packet_triggering_both_detectors_stores_two_alerts(monkeypatch):
 
     assert len(generated) == 2, f"Expected 2 alerts, got {len(generated)}"
     threat_types = {a["threat_type"] for a in generated}
-    assert threat_types == {THREAT_TYPE_PORT_SCAN, THREAT_TYPE_HIGH_TRAFFIC}
+    assert threat_types == {THREAT_TYPE_PORT_SCAN, THREAT_TYPE_VOLUMETRIC}
 
     # Verify both are stored in database
     conn = get_connection()
@@ -413,7 +413,7 @@ def test_packet_triggering_both_detectors_stores_two_alerts(monkeypatch):
 
     stored_types = {r[0] for r in rows}
     assert THREAT_TYPE_PORT_SCAN in stored_types
-    assert any(t in stored_types for t in (THREAT_TYPE_HIGH_TRAFFIC, "VOLUMETRIC"))
+    assert THREAT_TYPE_VOLUMETRIC in stored_types
 
 
 # =============================================================================
@@ -569,7 +569,7 @@ def test_api_stats_group_by_threat_type(client):
     )
     insert_alert(
         {
-            "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+            "threat_type": THREAT_TYPE_VOLUMETRIC,
             "severity": "HIGH",
             "source_ip": "1.1.1.3",
         }

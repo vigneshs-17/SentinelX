@@ -9,7 +9,6 @@ using event-time timestamps.
 from config.settings import (
     HORIZONTAL_SCAN_THRESHOLD,
     PORT_SCAN_TIME_WINDOW,
-    THREAT_TYPE_HIGH_TRAFFIC,
     THREAT_TYPE_PORT_SCAN,
     THREAT_TYPE_VOLUMETRIC,
     VERTICAL_SCAN_THRESHOLD,
@@ -275,10 +274,10 @@ class TestDetectionEngine:
             }
             alerts.extend(engine.process_packet(packet_data))
 
-        vol_alerts = [a for a in alerts if a.threat_type in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC)]
+        vol_alerts = [a for a in alerts if a.threat_type == THREAT_TYPE_VOLUMETRIC]
         assert len(vol_alerts) >= 1
         first_alert = vol_alerts[0].to_dict()
-        assert first_alert["threat_type"] in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC)
+        assert first_alert["threat_type"] == THREAT_TYPE_VOLUMETRIC
         assert first_alert["destination_ip"] == target_ip
 
     def test_rate_based_high_traffic_pps(self):
@@ -304,7 +303,7 @@ class TestDetectionEngine:
             }
             alerts.extend(engine.process_packet(packet_data))
 
-        vol_alerts = [a for a in alerts if a.threat_type in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC)]
+        vol_alerts = [a for a in alerts if a.threat_type == THREAT_TYPE_VOLUMETRIC]
         assert len(vol_alerts) >= 1
 
     def test_byte_rate_high_traffic_bps(self):
@@ -330,7 +329,7 @@ class TestDetectionEngine:
             }
             alerts.extend(engine.process_packet(packet_data))
 
-        vol_alerts = [a for a in alerts if a.threat_type in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC)]
+        vol_alerts = [a for a in alerts if a.threat_type == THREAT_TYPE_VOLUMETRIC]
         assert len(vol_alerts) >= 1
         assert vol_alerts[0].evidence["byte_rate_bps"] >= 2_000_000.0
 

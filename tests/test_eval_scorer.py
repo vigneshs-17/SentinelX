@@ -12,7 +12,14 @@ from pathlib import Path
 
 from scapy.all import wrpcap
 
+from config.settings import (
+    PORT_SCAN_TIME_WINDOW,
+    SLOW_SCAN_TIME_WINDOW,
+    SYN_FLOOD_TIME_WINDOW,
+    VOLUMETRIC_TIME_WINDOW,
+)
 from eval.scenarios import (
+    DEFAULT_BASE_TS,
     SCENARIO_NAMES,
     generate_scenario,
 )
@@ -21,6 +28,7 @@ from eval.score import (
     compute_suite_metrics,
     evaluate_scenario,
     generate_markdown_report,
+    get_detector_tolerance,
 )
 
 
@@ -178,37 +186,135 @@ def test_scorer_false_negative():
     assert res.passed is False
 
 
-def test_scorer_time_overlap_tolerance():
-    """Verify alert matches when within tolerance window, and fails when outside."""
+def test_scorer_detector_tolerances_match_windows():
+    """Verify that get_detector_tolerance reads exact window constants from config."""
+    assert get_detector_tolerance("PORT_SCAN (VERTICAL)") == float(PORT_SCAN_TIME_WINDOW)
+    assert get_detector_tolerance("PORT_SCAN (HORIZONTAL)") == float(PORT_SCAN_TIME_WINDOW)
+    assert get_detector_tolerance("PORT_SCAN (SLOW)") == float(SLOW_SCAN_TIME_WINDOW)
+    assert get_detector_tolerance("SYN_FLOOD") == float(SYN_FLOOD_TIME_WINDOW)
+    assert get_detector_tolerance("VOLUMETRIC") == float(VOLUMETRIC_TIME_WINDOW)
+
+
+def test_scorer_boundary_within_window_is_tp():
+    """Verify alert at end_ts + window - 0.1s matches ground truth as a True Positive."""
+    window = float(PORT_SCAN_TIME_WINDOW)
+    start_ts = DEFAULT_BASE_TS
+    end_ts = DEFAULT_BASE_TS + 10.0
     label = {
         "attack_type": "PORT_SCAN",
         "scan_type": "VERTICAL",
         "attacker_ips": ["198.51.100.50"],
         "victim_ip": "192.168.1.100",
         "victim_port": None,
-        "start_ts": 1000.0,
-        "end_ts": 1010.0,
+        "start_ts": start_ts,
+        "end_ts": end_ts,
     }
-
-    # Within tolerance: alert at 1020.0 (end_ts + 10s <= end_ts + 60s)
-    alert_valid = {
+    alert = {
         "threat_type": "PORT_SCAN",
         "scan_type": "VERTICAL",
         "source_ip": "198.51.100.50",
         "destination_ip": "192.168.1.100",
-        "last_seen": 1020.0,
+        "destination_port": 80,
+        "first_seen": start_ts,
+        "last_seen": end_ts + window - 0.1,
     }
-    assert _match_alert_to_label(alert_valid, label) is True
+    assert _match_alert_to_label(alert, label) is True
 
-    # Outside tolerance: alert at 1080.0 (> end_ts + 60s)
-    alert_stale = {
+    res = evaluate_scenario(
+        scenario_name="test_boundary_tp",
+        alerts=[alert],
+        ground_truth=[label],
+        expected_alerts=[{"threat_type": "PORT_SCAN", "scan_type": "VERTICAL", "count": 1}],
+        packet_count=50,
+        duration_seconds=end_ts - start_ts + window,
+        benign_duration_seconds=0.0,
+    )
+    assert res.tp == 1
+    assert res.fp == 0
+    assert res.fn == 0
+    assert res.precision == 1.0
+    assert res.recall == 1.0
+    assert res.f1 == 1.0
+    assert res.passed is True
+
+
+def test_scorer_boundary_outside_window_is_fp_and_fn():
+    """Verify alert at end_ts + window + 0.1s is outside window, yielding 1 FP and 1 FN."""
+    window = float(PORT_SCAN_TIME_WINDOW)
+    start_ts = DEFAULT_BASE_TS
+    end_ts = DEFAULT_BASE_TS + 10.0
+    label = {
+        "attack_type": "PORT_SCAN",
+        "scan_type": "VERTICAL",
+        "attacker_ips": ["198.51.100.50"],
+        "victim_ip": "192.168.1.100",
+        "victim_port": None,
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+    }
+    alert = {
         "threat_type": "PORT_SCAN",
         "scan_type": "VERTICAL",
         "source_ip": "198.51.100.50",
         "destination_ip": "192.168.1.100",
-        "last_seen": 1080.0,
+        "destination_port": 80,
+        "first_seen": start_ts,
+        "last_seen": end_ts + window + 0.1,
     }
-    assert _match_alert_to_label(alert_stale, label) is False
+    assert _match_alert_to_label(alert, label) is False
+
+    res = evaluate_scenario(
+        scenario_name="test_boundary_late",
+        alerts=[alert],
+        ground_truth=[label],
+        expected_alerts=[{"threat_type": "PORT_SCAN", "scan_type": "VERTICAL", "count": 1}],
+        packet_count=50,
+        duration_seconds=end_ts - start_ts + window + 5.0,
+        benign_duration_seconds=0.0,
+    )
+    assert res.tp == 0
+    assert res.fp == 1
+    assert res.fn == 1
+    assert res.passed is False
+
+
+def test_scorer_boundary_before_start_is_fp():
+    """Verify alert before start_ts - 1.0s does not match and is counted as a False Positive."""
+    start_ts = DEFAULT_BASE_TS
+    end_ts = DEFAULT_BASE_TS + 10.0
+    label = {
+        "attack_type": "PORT_SCAN",
+        "scan_type": "VERTICAL",
+        "attacker_ips": ["198.51.100.50"],
+        "victim_ip": "192.168.1.100",
+        "victim_port": None,
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+    }
+    alert = {
+        "threat_type": "PORT_SCAN",
+        "scan_type": "VERTICAL",
+        "source_ip": "198.51.100.50",
+        "destination_ip": "192.168.1.100",
+        "destination_port": 80,
+        "first_seen": start_ts - 2.0,
+        "last_seen": start_ts - 1.1,
+    }
+    assert _match_alert_to_label(alert, label) is False
+
+    res = evaluate_scenario(
+        scenario_name="test_boundary_early",
+        alerts=[alert],
+        ground_truth=[],
+        expected_alerts=[],
+        packet_count=50,
+        duration_seconds=end_ts - start_ts,
+        benign_duration_seconds=end_ts - start_ts,
+    )
+    assert res.tp == 0
+    assert res.fp == 1
+    assert res.fn == 0
+    assert res.passed is False
 
 
 def test_scorer_two_attacks_same_ip():

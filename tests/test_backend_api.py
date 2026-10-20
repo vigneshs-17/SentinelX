@@ -6,8 +6,8 @@ from backend.api import app
 from config.settings import (
     API_DEFAULT_LIMIT,
     API_MAX_LIMIT,
-    THREAT_TYPE_HIGH_TRAFFIC,
     THREAT_TYPE_PORT_SCAN,
+    THREAT_TYPE_VOLUMETRIC,
 )
 from database.database import insert_alert
 
@@ -304,7 +304,7 @@ class TestBackendApi:
         insert_alert(
             {
                 "timestamp": "2026-09-11T12:00:01",
-                "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+                "threat_type": THREAT_TYPE_VOLUMETRIC,
                 "severity": "HIGH",
                 "source_ip": "10.0.0.3",
                 "destination_ip": "10.0.0.4",
@@ -319,11 +319,16 @@ class TestBackendApi:
         assert len(scan_alerts) == 1
         assert scan_alerts[0]["threat_type"] == THREAT_TYPE_PORT_SCAN
 
-        resp_traffic = client.get(f"/api/alerts?threat_type={THREAT_TYPE_HIGH_TRAFFIC}")
+        resp_traffic = client.get(f"/api/alerts?threat_type={THREAT_TYPE_VOLUMETRIC}")
         assert resp_traffic.status_code == 200
         traffic_alerts = resp_traffic.get_json()
         assert len(traffic_alerts) == 1
-        assert traffic_alerts[0]["threat_type"] == THREAT_TYPE_HIGH_TRAFFIC
+        assert traffic_alerts[0]["threat_type"] == THREAT_TYPE_VOLUMETRIC
+
+        # Backward compatibility filter check: API accepts legacy HIGH_TRAFFIC query
+        resp_legacy = client.get("/api/alerts?threat_type=HIGH_TRAFFIC")
+        assert resp_legacy.status_code == 200
+        assert len(resp_legacy.get_json()) == 1
 
     def test_alerts_filtering_by_severity_and_source_ip(self, client):
         """Verify filtering by severity and source_ip."""
@@ -420,12 +425,12 @@ class TestBackendApi:
                 }
             )
 
-        # Insert 4 HIGH HIGH_TRAFFIC
+        # Insert 4 HIGH VOLUMETRIC
         for _ in range(4):
             insert_alert(
                 {
                     "timestamp": "2026-09-11T12:00:00",
-                    "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+                    "threat_type": THREAT_TYPE_VOLUMETRIC,
                     "severity": "HIGH",
                     "source_ip": "192.168.1.12",
                     "destination_ip": "192.168.1.1",
@@ -434,11 +439,11 @@ class TestBackendApi:
                 }
             )
 
-        # Insert 1 MEDIUM HIGH_TRAFFIC
+        # Insert 1 MEDIUM VOLUMETRIC
         insert_alert(
             {
                 "timestamp": "2026-09-11T12:00:00",
-                "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
+                "threat_type": THREAT_TYPE_VOLUMETRIC,
                 "severity": "MEDIUM",
                 "source_ip": "192.168.1.13",
                 "destination_ip": "192.168.1.1",

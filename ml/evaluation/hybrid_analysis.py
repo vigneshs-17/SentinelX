@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Any
 
 from config.settings import (
-    THREAT_TYPE_HIGH_TRAFFIC,
     THREAT_TYPE_PORT_SCAN,
     THREAT_TYPE_VOLUMETRIC,
 )
@@ -75,7 +74,7 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
         for i in range(1050)
     ]
 
-    ml_flood_detections = sum(1 for p in flood_packets if predict_threat(p) == THREAT_TYPE_HIGH_TRAFFIC)
+    ml_flood_detections = sum(1 for p in flood_packets if predict_threat(p) in ("HIGH_TRAFFIC", THREAT_TYPE_VOLUMETRIC))
     rule_flood_alerts = []
     hybrid_flood_confirmed = []
 
@@ -85,7 +84,7 @@ def run_hybrid_comparison_experiment() -> dict[str, Any]:
             alert_dict = ra.to_dict()
             rule_flood_alerts.append(alert_dict)
             ml_p = predict_threat(p)
-            if ml_p in (alert_dict["threat_type"], THREAT_TYPE_HIGH_TRAFFIC, THREAT_TYPE_VOLUMETRIC):
+            if ml_p in (alert_dict["threat_type"], "HIGH_TRAFFIC", THREAT_TYPE_VOLUMETRIC):
                 hybrid_flood_confirmed.append(alert_dict)
 
     results["scenarios"]["high_traffic_flood"] = {

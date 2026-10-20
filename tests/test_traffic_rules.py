@@ -1,7 +1,6 @@
 import threading
 
 from config.settings import (
-    THREAT_TYPE_HIGH_TRAFFIC,
     THREAT_TYPE_VOLUMETRIC,
 )
 from detection.engine import DetectionEngine
@@ -71,20 +70,20 @@ def test_high_traffic_detection():
         pkt = create_packet(ts=2000.0 + (i * 0.004))  # 250 pps
         res = engine.process_packet(pkt)
         for a in res:
-            if a.threat_type in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC):
+            if a.threat_type == THREAT_TYPE_VOLUMETRIC:
                 alerts_seen.append(a)
                 if first_alert is None:
                     first_alert = a.to_dict()
 
     assert first_alert is not None
-    assert first_alert["threat_type"] in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC)
+    assert first_alert["threat_type"] == THREAT_TYPE_VOLUMETRIC
     assert first_alert["severity"] in ("MEDIUM", "HIGH")
     assert first_alert["evidence"]["packet_count"] >= 200
 
     # Additional high-traffic packets during cooldown must be suppressed
     extra_pkt = create_packet(ts=2001.5)
     duplicate_res = engine.process_packet(extra_pkt)
-    vol_dups = [a for a in duplicate_res if a.threat_type in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC)]
+    vol_dups = [a for a in duplicate_res if a.threat_type == THREAT_TYPE_VOLUMETRIC]
     assert len(vol_dups) == 0
 
     print("High traffic detection test passed!")
@@ -106,11 +105,11 @@ def test_high_traffic_byte_rate_detection():
         pkt = create_packet(ts=3000.0 + (i * 0.004), size=50000)  # 50 KB * 250 = 12.5 MB in 1s
         res = engine.process_packet(pkt)
         for a in res:
-            if a.threat_type in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC) and first_alert is None:
+            if a.threat_type == THREAT_TYPE_VOLUMETRIC and first_alert is None:
                 first_alert = a.to_dict()
 
     assert first_alert is not None
-    assert first_alert["threat_type"] in (THREAT_TYPE_VOLUMETRIC, THREAT_TYPE_HIGH_TRAFFIC)
+    assert first_alert["threat_type"] == THREAT_TYPE_VOLUMETRIC
     assert first_alert["evidence"]["byte_rate_bps"] >= 1000000.0
 
 

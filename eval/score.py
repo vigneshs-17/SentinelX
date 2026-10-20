@@ -13,12 +13,16 @@ from pathlib import Path
 from typing import Any
 
 from config.settings import (
+    PORT_SCAN_TIME_WINDOW,
     SCAN_TYPE_HORIZONTAL,
     SCAN_TYPE_SLOW,
     SCAN_TYPE_VERTICAL,
+    SLOW_SCAN_TIME_WINDOW,
+    SYN_FLOOD_TIME_WINDOW,
     THREAT_TYPE_PORT_SCAN,
     THREAT_TYPE_SYN_FLOOD,
     THREAT_TYPE_VOLUMETRIC,
+    VOLUMETRIC_TIME_WINDOW,
 )
 from detection.alert import Alert
 
@@ -29,6 +33,19 @@ DETECTOR_CATEGORIES = [
     "SYN_FLOOD",
     "VOLUMETRIC",
 ]
+
+
+def get_detector_tolerance(category: str) -> float:
+    """Returns the time tolerance for a detector category, equal to its configured time window."""
+    if "SLOW" in category:
+        return float(SLOW_SCAN_TIME_WINDOW)
+    elif "PORT_SCAN" in category:
+        return float(PORT_SCAN_TIME_WINDOW)
+    elif category == "SYN_FLOOD":
+        return float(SYN_FLOOD_TIME_WINDOW)
+    elif category == "VOLUMETRIC":
+        return float(VOLUMETRIC_TIME_WINDOW)
+    return float(PORT_SCAN_TIME_WINDOW)
 
 
 def _get_category(item: Alert | dict[str, Any]) -> str:
@@ -55,10 +72,15 @@ def _get_category(item: Alert | dict[str, Any]) -> str:
     return str(threat_type)
 
 
-def _match_alert_to_label(alert: Alert | dict[str, Any], label: dict[str, Any], time_tolerance: float = 60.0) -> bool:
+def _match_alert_to_label(
+    alert: Alert | dict[str, Any],
+    label: dict[str, Any],
+    time_tolerance: float | None = None,
+) -> bool:
     """
     Checks if an alert matches a ground-truth label by attack type,
     endpoints, and time interval overlap.
+    Uses per-detector time window tolerance when time_tolerance is None.
     """
     alert_cat = _get_category(alert)
     label_cat = _get_category(label)
@@ -94,10 +116,11 @@ def _match_alert_to_label(alert: Alert | dict[str, Any], label: dict[str, Any], 
         if dst_port is not None and dst_port != victim_port:
             return False
 
-    # 4. Time overlap check
+    # 4. Time overlap check with per-detector tolerance
+    tolerance = get_detector_tolerance(alert_cat) if time_tolerance is None else time_tolerance
     start_ts = float(label.get("start_ts", 0.0))
     end_ts = float(label.get("end_ts", 0.0))
-    if not (start_ts - 1.0 <= alert_ts <= end_ts + time_tolerance):
+    if not (start_ts - 1.0 <= alert_ts <= end_ts + tolerance):
         return False
 
     return True
@@ -166,6 +189,7 @@ def evaluate_scenario(
     packet_count: int,
     duration_seconds: float,
     benign_duration_seconds: float,
+    time_tolerance: float | None = None,
 ) -> ScenarioEvaluationResult:
     """
     Evaluates a single scenario run against ground truth labels and golden expectations.
@@ -179,7 +203,7 @@ def evaluate_scenario(
 
     for l_idx, label in enumerate(ground_truth):
         for a_idx, alert in enumerate(raw_alerts):
-            if _match_alert_to_label(alert, label):
+            if _match_alert_to_label(alert, label, time_tolerance=time_tolerance):
                 matched_label_indices.add(l_idx)
                 matched_alert_indices.add(a_idx)
 
@@ -252,33 +276,34 @@ def compute_suite_metrics(
     detector_metrics: dict[str, DetectorMetrics] = {cat: DetectorMetrics(category=cat) for cat in DETECTOR_CATEGORIES}
     detector_ttd: dict[str, list[float]] = {cat: [] for cat in DETECTOR_CATEGORIES}
 
-    all_alerts: list[dict[str, Any]] = []
-    all_labels: list[dict[str, Any]] = []
-
+    # Match scenario by scenario to avoid cross-scenario alert/label contamination
     for r in scenario_results:
-        all_alerts.extend(r.alerts)
-        all_labels.extend(r.ground_truth)
+        for cat in DETECTOR_CATEGORIES:
+            cat_labels = [lbl for lbl in r.ground_truth if _get_category(lbl) == cat]
+            cat_alerts = [alt for alt in r.alerts if _get_category(alt) == cat]
 
-    # Compute matches per detector category
-    for cat in DETECTOR_CATEGORIES:
-        cat_labels = [lbl for lbl in all_labels if _get_category(lbl) == cat]
-        cat_alerts = [alt for alt in all_alerts if _get_category(alt) == cat]
+            matched_label_indices: set[int] = set()
+            matched_alert_indices: set[int] = set()
 
-        matched_labels: set[int] = set()
-        matched_alerts: set[int] = set()
-
-        for l_idx, label in enumerate(cat_labels):
-            for a_idx, alert in enumerate(cat_alerts):
-                if _match_alert_to_label(alert, label):
-                    matched_labels.add(l_idx)
-                    matched_alerts.add(a_idx)
-                    ttd = max(0.0, float(alert.get("last_seen", 0.0)) - float(label.get("start_ts", 0.0)))
+            for l_idx, label in enumerate(cat_labels):
+                label_matched_alerts = []
+                for a_idx, alert in enumerate(cat_alerts):
+                    if _match_alert_to_label(alert, label):
+                        matched_label_indices.add(l_idx)
+                        matched_alert_indices.add(a_idx)
+                        label_matched_alerts.append(alert)
+                if label_matched_alerts:
+                    # Time to detect is earliest matching alert ts - attack start_ts
+                    first_alert_ts = min(float(a.get("last_seen") or a.get("ts") or 0.0) for a in label_matched_alerts)
+                    ttd = max(0.0, first_alert_ts - float(label.get("start_ts", 0.0)))
                     detector_ttd[cat].append(ttd)
 
-        dm = detector_metrics[cat]
-        dm.tp = len(matched_labels)
-        dm.fn = len(cat_labels) - dm.tp
-        dm.fp = len(cat_alerts) - len(matched_alerts)
+            dm = detector_metrics[cat]
+            dm.tp += len(matched_label_indices)
+            dm.fn += len(cat_labels) - len(matched_label_indices)
+            dm.fp += len(cat_alerts) - len(matched_alert_indices)
+
+    for cat, dm in detector_metrics.items():
         dm.compute(detector_ttd[cat])
 
     # Overall suite metrics

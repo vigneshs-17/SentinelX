@@ -24,6 +24,8 @@ SCENARIO_NAMES = [
     "mixed",
 ]
 
+DEFAULT_BASE_TS = 1_790_000_000.0
+
 
 def _build_tcp_packet(
     src_ip: str,
@@ -63,7 +65,7 @@ def _build_udp_packet(
 
 
 def generate_benign_web_browsing(
-    seed: int = 42, base_ts: float = 1000.0
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates benign web browsing: multiple internal clients performing complete
@@ -119,11 +121,12 @@ def generate_benign_web_browsing(
 
 
 def generate_benign_bulk_download(
-    seed: int = 42, base_ts: float = 1000.0
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates a sustained benign download of ~50 Mbit/s (~6.25 MB/s) from a CDN to a local client.
-    Remains below the 80 Mbit/s (10 MB/s) volumetric anomaly floor.
+    60s of one server -> one client TCP traffic at ~4,200 packets/s with 1,500-byte packets (~50 Mbit/s),
+    starting cold (no prior baseline for that destination).
     Expected alerts: 0.
     """
     packets: list[Any] = []
@@ -135,17 +138,21 @@ def generate_benign_bulk_download(
     # Handshake
     curr_ts = base_ts
     packets.append(_build_tcp_packet(client, server, dport, sport, "S", curr_ts))
-    curr_ts += 0.01
+    curr_ts += 0.001
     packets.append(_build_tcp_packet(server, client, sport, dport, "SA", curr_ts))
-    curr_ts += 0.01
+    curr_ts += 0.001
     packets.append(_build_tcp_packet(client, server, dport, sport, "A", curr_ts))
-    curr_ts += 0.01
+    curr_ts += 0.001
 
-    # Bulk transfer: 600 packets of 1,400 bytes payload across 1.2s (~5.8 MB/s ~ 46 Mbit/s)
-    payload = b"D" * 1400
-    pkt_interval = 1.2 / 600.0
-    for _ in range(600):
-        packets.append(_build_tcp_packet(server, client, sport, dport, "A", curr_ts, payload=payload))
+    # Bulk transfer: 60 s at ~4,200 packets/s with 1,500-byte packets (1,460 payload) = 252,000 packets
+    total_data_packets = 252_000
+    pkt_interval = 60.0 / total_data_packets
+    template = _build_tcp_packet(server, client, sport, dport, "A", curr_ts, payload=b"D" * 1460)
+
+    for _ in range(total_data_packets):
+        pkt = template.copy()
+        pkt.time = curr_ts
+        packets.append(pkt)
         curr_ts += pkt_interval
 
     duration = curr_ts - base_ts
@@ -154,7 +161,7 @@ def generate_benign_bulk_download(
 
 
 def generate_benign_lan_noise(
-    seed: int = 42, base_ts: float = 1000.0
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates normal background LAN traffic: DNS, NTP, mDNS, and SSDP multicast.
@@ -195,12 +202,12 @@ def generate_benign_lan_noise(
 
 
 def generate_fast_vertical_scan(
-    seed: int = 42, base_ts: float = 1000.0
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates a fast vertical TCP SYN port scan: single attacker probes 30 distinct ports
     on a target host within 3 seconds (random port order, jitter).
-    Threshold is 15 ports in 60s.
+    Threshold is 15 ports in 10s (PORT_SCAN_TIME_WINDOW).
     Expected alerts: 1 PORT_SCAN (VERTICAL).
     """
     rng = random.Random(seed)
@@ -234,12 +241,12 @@ def generate_fast_vertical_scan(
 
 
 def generate_horizontal_sweep(
-    seed: int = 42, base_ts: float = 1000.0
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates a horizontal port scan sweep: single attacker probes port 445 (SMB)
     across 20 distinct hosts within 2 seconds.
-    Threshold is 10 hosts in 60s.
+    Threshold is 10 hosts in 10s (PORT_SCAN_TIME_WINDOW).
     Expected alerts: 1 PORT_SCAN (HORIZONTAL).
     """
     rng = random.Random(seed)
@@ -273,11 +280,11 @@ def generate_horizontal_sweep(
 
 
 def generate_slow_scan(
-    seed: int = 42, base_ts: float = 1000.0
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates a stealthy slow port scan: 25 distinct ports probed over 120 seconds (5s intervals).
-    Since rate is < 15 ports per 60s window, Vertical detector does not trigger.
+    Since rate is < 15 ports per 10s window (PORT_SCAN_TIME_WINDOW), Vertical detector does not trigger.
     SlowScanDetector (threshold 20, window 300s) detects it.
     Expected alerts: 1 PORT_SCAN (SLOW).
     """
@@ -312,7 +319,7 @@ def generate_slow_scan(
 
 
 def generate_syn_flood_spoofed(
-    seed: int = 42, base_ts: float = 1000.0
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates a SYN flood attack with spoofed source IPs targeting victim port 80.
@@ -352,7 +359,7 @@ def generate_syn_flood_spoofed(
 
 
 def generate_udp_flood_inbound(
-    seed: int = 42, base_ts: float = 1000.0
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates a distributed inbound UDP flood: 35s of warm-up baseline traffic followed by
@@ -404,7 +411,9 @@ def generate_udp_flood_inbound(
     return packets, labels, meta
 
 
-def generate_mixed(seed: int = 42, base_ts: float = 1000.0) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
+def generate_mixed(
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
+) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Simulates a 10-minute (600 s) timeline containing background benign traffic
     interleaved with all 5 distinct attack patterns at designated intervals.
@@ -488,7 +497,7 @@ GENERATORS = {
 def generate_scenario(
     name: str,
     seed: int = 42,
-    base_ts: float = 1000.0,
+    base_ts: float = DEFAULT_BASE_TS,
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
     """
     Generates a scenario by name.
@@ -503,7 +512,7 @@ def write_scenario_files(
     name: str,
     out_dir: Path | str,
     seed: int = 42,
-    base_ts: float = 1000.0,
+    base_ts: float = DEFAULT_BASE_TS,
 ) -> tuple[Path, Path]:
     """
     Generates scenario traffic and writes `{name}.pcap` and `{name}_labels.json` to out_dir.
