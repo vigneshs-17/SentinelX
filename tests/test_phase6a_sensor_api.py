@@ -148,8 +148,14 @@ def test_api_command_serves_with_waitress_not_the_flask_dev_server(monkeypatch, 
     monkeypatch.setenv("SENTINELX_APP_DB_PATH", str(tmp_path / "app.db"))
     initialize_app_database()
     accounts.create_user("admin-one", "correct horse battery", "admin")
-    with patch("waitress.serve") as serve, patch.object(api_mod.app, "run") as flask_run:
+    # The housekeeping loop is a real thread; started here it would outlive the test and touch the temp dir.
+    with (
+        patch("waitress.serve") as serve,
+        patch.object(api_mod.app, "run") as flask_run,
+        patch("backend.housekeeping.start") as housekeeping_start,
+    ):
         main_mod.handle_api(main_mod.parse_arguments(["api"]))
+    housekeeping_start.assert_called_once()
     serve.assert_called_once()
     assert serve.call_args.args[0] is api_mod.app and serve.call_args.kwargs["threads"] >= 1
     flask_run.assert_not_called()

@@ -170,7 +170,8 @@ def test_old_readonly_open_failed_on_a_readonly_copy_and_the_new_one_reads_but_c
     dest = readonly_copy_of_cleanly_closed_wal_db(tmp_path)
     with locked_dir(dest.parent):
         old = sqlite3.connect(f"{dest.as_uri()}?mode=ro", uri=True)  # the pre-fix open
-        with pytest.raises(sqlite3.OperationalError, match="unable to open"):
+        # Windows reports "unable to open database file", Linux "attempt to write a readonly database".
+        with pytest.raises(sqlite3.OperationalError, match="unable to open|readonly database"):
             old.execute("SELECT COUNT(*) FROM alerts").fetchone()
         old.close()
 
