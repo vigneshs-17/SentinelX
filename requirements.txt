@@ -9,7 +9,7 @@ itsdangerous==2.2.0
 Jinja2==3.1.6
 joblib==1.6.0
 MarkupSafe==3.0.3
-narwhals==2.25.0
+narwhals==2.27.1
 numpy==2.5.2
 packaging==26.3
 pandas==3.0.5
