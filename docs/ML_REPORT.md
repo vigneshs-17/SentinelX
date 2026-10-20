@@ -44,4 +44,6 @@ Before loading, the signature is checked with `hmac.compare_digest`; then skops 
 
 **This stops:** a tampered, truncated, swapped or unsigned model file; a model file that tries to instantiate arbitrary classes; loading a model whose features do not match the code; enabling a model that did not pass the gate.
 
+**What the signature proves:** only that the model and gate files were not changed after the key holder signed them. It does not prove the key holder evaluated honestly: whoever holds the key can sign a PASS for any model.
+
 **This does not stop:** a compromised training machine (it can train and sign a malicious model); a stolen or leaked `SENTINELX_MODEL_KEY` (whoever holds it can sign anything); poisoned training data; an attacker who can both replace the model and read the key from the host environment.

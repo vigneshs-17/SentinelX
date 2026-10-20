@@ -15,7 +15,7 @@ This module provides a deterministic, seeded synthetic traffic generator and aut
 1. `benign_web_browsing`: Multiple internal clients initiating complete 3-way handshakes, TLS client/server hello exchanges, and clean teardowns across legitimate web endpoints.
 2. `benign_bulk_download`: Sustained transfer of 60 s at ~4,200 packets/s with 1,500-byte packets (~50 Mbit/s) starting cold without prior baseline, remaining below volumetric ceilings and EWMA thresholds.
 3. `benign_lan_noise`: Broadcast and multicast discovery traffic (DNS, NTP, mDNS, SSDP) that must not trigger scan or flood alerts.
-4. `fast_vertical_scan`: Single attacker probing 30 distinct destination ports in randomized order within 3 seconds (exceeding 15 ports in 10 s `PORT_SCAN_TIME_WINDOW`).
+4. `fast_vertical_scan`: Single attacker probing 30 distinct destination ports in randomized order within 3 seconds (exceeding the 10-port `PORT_SCAN_THRESHOLD` within the 10 s `PORT_SCAN_TIME_WINDOW`).
 5. `horizontal_sweep`: Single attacker probing port 445 (SMB) across 20 distinct targets within 2 seconds (exceeding 10 hosts in 10 s `PORT_SCAN_TIME_WINDOW`).
 6. `slow_scan`: Stealthy vertical port scan (25 ports spaced 5 seconds apart over 120 seconds) bypassing the 10 s vertical window (`PORT_SCAN_TIME_WINDOW`) and caught by the slow scan detector (`SLOW_SCAN_TIME_WINDOW` = 300 s).
 7. `syn_flood_spoofed`: 600 client SYN packets targeting port 80 at 200 pps with spoofed source IPs and zero handshake completions.

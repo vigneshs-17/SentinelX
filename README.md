@@ -1,333 +1,185 @@
 # SentinelX
 
-## Network Intrusion Detection & Threat Monitoring System
+A passive network intrusion detection system in Python. A sensor process captures packets (or replays a PCAP), runs five rule-based detectors on packet event time, and writes alerts to SQLite and JSONL. A separate API process serves a login-protected console and REST API from a read-only view of those alerts.
 
-SentinelX is a lightweight, hybrid network intrusion detection and threat monitoring system built with Python. It pairs stateful, rule-based heuristics with a secondary machine-learning confirmation layer, decoupled producer-consumer queueing, dual SQLite and JSONL persistence, a secured Flask REST API, and a zero-dependency web-based security operations console.
+![Overview of the SentinelX console](docs/img/overview-dark.png)
 
-The project demonstrates practical cybersecurity engineering concepts including real-time network traffic analysis, flow tracking, multi-worker packet processing, cryptographic model verification, defensive API security, and robust alert management.
+## What it is and why it exists
 
----
+SentinelX watches TCP/UDP header metadata and raises alerts for five patterns: vertical port scans, horizontal sweeps, slow scans, SYN floods and volumetric floods. It is a learning-scale project built to be checked, not trusted on faith: detectors run on packet timestamps so the same PCAP gives the same alerts on any machine, every detector has a documented evasion, and a scenario benchmark runs in CI.
 
-![SentinelX Security Operations Console](screenshots/dashboard.png)
+It is a passive monitor on one host. It does not block traffic, inspect payloads, or scale past one CPU core on the packet path (see [Limitations](#limitations)).
 
----
+## 60-second quickstart
 
-## Core Capabilities
+### Linux, Docker
 
-- **Real-Time & Offline Processing:** Captures live traffic via Scapy or replays packet capture (.pcap) files.
-- **Decoupled Architecture:** High-throughput producer-consumer queueing isolating capture from detection.
-- **Stateful Heuristics:** Sliding-window vertical and horizontal TCP SYN port scan detection and volumetric traffic anomaly detection.
-- **Optional Flow-Level ML (off by default):** A flow-based model trained and tested on real labelled traffic; it only enters the alert path if it beats rules-only on held-out data (see `docs/ML_REPORT.md`). Signed `skops` artifacts, never pickle.
-- **Dual Persistence:** Append-only JSON Lines (`alerts.jsonl`) with size-based rotation and transactional SQLite storage in WAL mode.
-- **Defensive API:** Hardened Flask REST endpoints with strict CORS lockdown, parameterized SQL, and defensive security headers.
-- **Modern Security Console:** Responsive, single-file dashboard with dynamic filtering, live telemetry, forensic inspection drawer, and XSS-immune DOM rendering.
-
----
-
-## System Architecture
-
-SentinelX uses a decoupled **Producer-Consumer** architecture designed to isolate packet capture from downstream processing, reduce capture-path blocking, and provide bounded backpressure with explicit drop accounting:
-
-```text
-               +--------------------------------------------+
-               |  Network Interface (Live) or PCAP Replay   |
-               +--------------------------------------------+
-                                     |
-                                     v
-                       +---------------------------+
-                       |  Packet Capture (Producer)|
-                       |   Fast non-blocking put   |
-                       +---------------------------+
-                                     |
-                                     v
-                       +---------------------------+
-                       |   Bounded FIFO Queue      |
-                       |  (Default maxsize: 10,000)|
-                       +---------------------------+
-                                     |
-                                     v
-                       +---------------------------+
-                       | Consumer Worker Thread(s) |
-                       |    (--workers 1 to N)     |
-                       +---------------------------+
-                                     |
-                                     v
-                       +---------------------------+
-                       |  Packet Parser & Filters  |
-                       |   (IPv4 / IPv6, TCP/UDP)  |
-                       +---------------------------+
-                                     |
-                                     v
-                       +---------------------------+
-                       |   Stateful Rule Engine    |
-                       +---------------------------+
-                        /                         \
-                       v                           v
-        +----------------------------+   +-----------------------------+
-        |   Port Scan Detection      |   | High-Traffic Rate Detection |
-        | - Vertical (>=10 ports/10s)|   | - Packet Count (>=1000/5s)  |
-        | - Horizontal (>=10 hosts)  |   | - Packet Rate (>=200 pps)   |
-        | - TCP SYN only; Cooldown   |   | - Byte Rate (>=2.0 MB/s)    |
-        +----------------------------+   +-----------------------------+
-                        \                         /
-                         v                       v
-                          Suspicious Threat Event
-                                     |
-                                     v
-                       +---------------------------+
-                       | Optional flow ML (gated,  |
-                       | additive only, default off)|
-                       +---------------------------+
-                                     |
-                                     v
-                       +---------------------------+
-                       |       Alert Logger        |
-                       +---------------------------+
-                        /                         \
-                       v                           v
-        +-----------------------------+   +-----------------------------+
-        |  Append-Only JSONL Log      |   |  SQLite Database            |
-        |  (logs/alerts.jsonl)        |   |  (database/sentinelx.db)    |
-        |  - 10 MB size-based rotation|   |  - WAL mode enabled         |
-        |  - Up to 5 backup archives  |   |  - Thread-safe persistence  |
-        +-----------------------------+   +-----------------------------+
-                                                         |
-                                                         v
-                                          +-----------------------------+
-                                          |  Hardened Flask REST API    |
-                                          |  - CSP & Permissions-Policy |
-                                          |  - CORS & Parameterized SQL |
-                                          +-----------------------------+
-                                                         |
-                                                         v
-                                          +-----------------------------+
-                                          | Security Operations Console |
-                                          | (XSS-Safe DOM Dashboard)    |
-                                          +-----------------------------+
-```
-
----
-
-## Detection Capabilities
-
-### 1. Vertical Port Scan
-Detects a single source IP scanning multiple ports on a targeted destination host:
-- **Threshold:** $\ge 10$ unique destination ports targeted on the same host within a 10.0-second sliding window.
-- **Traffic Scope:** Evaluates only TCP SYN connection probes (`tcp_syn == True`). Normal established TCP traffic (ACK/PSH) and UDP packets are safely ignored.
-- **Alert Suppression:** 30.0-second cooldown window per source/target pair prevents alert floods during sustained sweeps.
-
-### 2. Horizontal Port Scan
-Detects a single source IP sweeping a specific port across multiple destination hosts:
-- **Threshold:** $\ge 10$ unique target hosts probed on the same destination port within a 10.0-second sliding window.
-- **Traffic Scope:** Evaluates only TCP SYN connection probes.
-- **Alert Suppression:** 30.0-second cooldown window per source/port pair.
-
-### 3. Volumetric High-Traffic Anomalies
-Detects abnormal network spikes from a single source host based on count, packet rate, or byte throughput:
-- **Thresholds:**
-  - Packet count $\ge 1,000$ packets within a 5.0-second observation window, OR
-  - Packet rate $\ge 200.0$ packets/second (with $\ge 50$ packets observed), OR
-  - Byte rate $\ge 2,000,000$ bytes/second ($2.0\text{ MB/s}$, with $\ge 50$ packets observed).
-- **Traffic Scope:** Inspects unicast TCP and UDP traffic; automatically filters broadcast (`255.255.255.255`) and multicast (`224.0.0.0/4`).
-- **Alert Suppression:** 30.0-second cooldown period; resets active tracking once traffic volume drops below 200 packets.
-
-### 4. Memory Bounding & State Pruning
-- Stateful host tracking in `FlowTracker` is bounded by default to 10,000 entries (`MAX_TRACKED_ENTRIES`).
-- Inactive hosts are pruned via opportunistic TTL sweeps (60.0-second TTL).
-- If capacity is exceeded, an LRU eviction algorithm safely purges the oldest inactive hosts.
-
----
-
-## Flow-Level Machine Learning (optional, default off)
-
-The earlier single-packet model was removed: it was trained on data generated by the same rules it was meant to
-confirm (circular). It is replaced by a flow-level model that is trained and tested on real labelled traffic, or
-it stays out of the runtime path.
-
-- **Flows, not packets:** one shared extractor (`ml/flows.py`) builds bidirectional flows by event time with a bounded table; the same code produces training rows and serving vectors. Features: `docs/ML_FEATURES.md`.
-- **Real data, our labels:** CIC-IDS2017 raw PCAPs, labelled by us from the published attack schedule (`docs/DATASET.md`). Third-party CSV labels are not used.
-- **Leakage-safe splits:** by day when a class spans days, otherwise contiguous time blocks with a purge gap of at least twice the flow active timeout. Never random rows.
-- **Decision gate:** ML enters the alert path only if rules+ML beats rules-only on held-out recall at equal or lower false alerts per benign hour. The result and the gate decision are generated into `docs/ML_REPORT.md`.
-- **Runtime role (only if the gate passed, `SENTINELX_ML=on`):** scores finished flows; may add an `ML_ANOMALY` alert (LOW/MEDIUM) and `ml_score`/`ml_label`. It never suppresses a rule alert.
-- **Artifact security:** HMAC-SHA256-signed `skops` file (key from `SENTINELX_MODEL_KEY`), explicit trusted-types list, feature-schema check and a signed gate file bound to the model hash. See the security section of `docs/ML_REPORT.md` for what this does and does not stop.
+The sensor shares the host network namespace and holds only `NET_RAW`. The API is a separate unprivileged container published on `127.0.0.1:5000`. Live capture inside the container is **not tested in CI** (the CI runs replay and the API); if promiscuous capture fails on your kernel, add `NET_ADMIN` to the sensor and tell us.
 
 ```bash
-python scripts/build_flows.py <pcaps> --out flows.csv.gz
-python main.py train --flows flows.csv.gz --out models
-python main.py eval --pcap <pcaps> --labels models/test_labels.json --ml-model models --out eval_output
+git clone https://github.com/vigneshs-17/SentinelX.git && cd SentinelX
+docker compose run --rm api python main.py user add admin --role admin
+docker compose up -d
 ```
 
----
+Open <http://127.0.0.1:5000/> and sign in as `admin`. Set `SENTINELX_INTERFACE` to pick a NIC. Docker was not run locally while writing this; the image and compose file are exercised only by the CI jobs (`scripts/ci_compose_check.py`), which have not run on GitHub yet.
 
-## Security Hardening
+### Windows, Npcap
 
-SentinelX includes defense-in-depth security measures across the frontend, API, and detection core:
+Docker Desktop cannot capture the host NIC, so run natively. Install [Npcap](https://npcap.com/) (tick "WinPcap API-compatible mode"), then in an **Administrator** PowerShell:
 
-| Area | Protection Mechanism |
-| :--- | :--- |
-| **Frontend XSS Immunity** | Dashboard DOM rendering uses exclusively `document.createElement()`, `element.textContent`, and `element.setAttribute()`. Zero use of `innerHTML`, `outerHTML`, or `eval()`. |
-| **Content Security Policy** | Restrictive CSP applied via HTTP headers and HTML `<meta>` tag: `default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:5000; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none';` |
-| **Permissions-Policy** | Explicitly disables unused browser APIs: `camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), display-capture=(), clipboard-write=(self)`. |
-| **CORS Lockdown** | Access-Control headers restricted to local origins (`http://127.0.0.1:5000`, `http://localhost:5000`). Requests with `Origin: null` are rejected by default. |
-| **SQL Injection Prevention** | All SQLite queries use parameterized statements (`?`) with strict input parameter whitelisting for threat types and severity. |
-| **Model Artifact Signing** | ML models are `skops` files (no pickle) verified with HMAC-SHA256 (`hmac.compare_digest`) before any deserialization, loaded with an explicit trusted-types list, and gated by a signed PASS decision. |
-| **Concurrency Hardening** | Re-entrant locks (`threading.RLock`) and mutex locks synchronize shared state across concurrent worker threads with an acyclic lock hierarchy, preventing race conditions. |
-| **DoS-Resistant Logging** | Append-only JSON Lines with size-based rotation prevents disk exhaustion and eliminates $O(N^2)$ full-file rewrites. |
-
----
-
-## Alert Logging & Data Storage
-
-- **JSON Lines (`logs/alerts.jsonl`):** Default runtime logging writes one JSON object per line using append-only file operations. Rotates automatically when reaching 10 MB, retaining up to 5 numbered backup files (`alerts.jsonl.1` through `.5`).
-- **Legacy Compatibility:** Seamlessly supports legacy JSON array logging if `SENTINELX_ALERT_LOG` explicitly ends in `.json`.
-- **SQLite Database (`database/sentinelx.db`):** Stores structured alert records transactionally with Write-Ahead Logging (`WAL`) enabled for high-concurrency read/write operations.
-
----
-
-## REST API Endpoints
-
-The Flask REST API provides structured endpoints for security dashboards and integration:
-
-| Endpoint | Method | Description | Cache Policy |
-| :--- | :---: | :--- | :--- |
-| `/health` | `GET` | Service status and SQLite database connectivity check | `no-store` |
-| `/api/health` | `GET` | Telemetry heartbeat endpoint polled by dashboard | `no-store` |
-| `/api/stats` | `GET` | Atomic aggregation of `total_alerts`, `high_severity`, `port_scans`, and `high_traffic` counts | `no-store` |
-| `/api/alerts` | `GET` | Fetches alert records with bounded pagination and optional filtering | `no-store` |
-
-### Alert Query Parameters
-- `limit`: Number of alerts to return (default: `100`, maximum: `500`).
-- `offset`: Offset index for pagination ($\ge 0$).
-- `threat_type`: Filter by canonical threat (`PORT_SCAN`, `HIGH_TRAFFIC`).
-- `severity`: Filter by severity level (`HIGH`, `MEDIUM`, `LOW`).
-- `source_ip`: Filter by attacker IP address.
-
----
-
-## Getting Started
-
-### Prerequisites
-- Python 3.10 or higher
-- WinPcap or Npcap (on Windows, for live packet sniffing) or `libpcap` (on Linux)
-
-### Installation
-```bash
-# Clone the repository
-git clone https://github.com/vigneshs-17/SentinelX.git
-cd SentinelX
-
-# Set up a virtual environment
-python -m venv .venv
-source .venv/bin/activate   # On Linux/macOS
-.\.venv\Scripts\activate     # On Windows
-
-# Install pinned dependencies
+```powershell
+git clone https://github.com/vigneshs-17/SentinelX.git; cd SentinelX
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+python main.py user add admin --role admin      # prompts for a password
+python main.py sensor                           # terminal 1: capture + detection
+python main.py api                              # terminal 2: console on http://127.0.0.1:5000/
 ```
 
-### Running SentinelX
+No hardware or admin rights? Replay a capture instead of sniffing: `python main.py replay path/to/file.pcap`.
 
-#### 1. Live Packet Capture (Default)
-Starts the background API and monitors network traffic on the default interface:
+Requires Python 3.12 or newer.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    NIC[NIC or PCAP] -->|"scapy sniff / replay"| ENQ["PacketPipeline.enqueue<br/>capture/pipeline.py"]
+    ENQ -->|"bounded queue, drops counted"| W["consumer thread<br/>PacketProcessor.process"]
+    W --> P["parse_packet<br/>capture/packet_parser.py"]
+    P --> E["DetectionEngine<br/>event-time clock"]
+    E --> D["5 detectors<br/>detection/detectors/"]
+    D --> S[("BoundedStateStore<br/>LRU + event-time TTL")]
+    D -->|Alert| SINK["CompositeSink<br/>logs/sinks.py"]
+    SINK --> DB[("alerts.db<br/>SQLite WAL")]
+    SINK --> J[("alerts.jsonl")]
+    SINK -.->|"optional"| WH["webhook<br/>background thread"]
+    DB -->|"mode=ro"| API["API process<br/>waitress + Flask"]
+    APP[("app.db<br/>users, sessions, triage, audit")] --- API
+    API -->|"HTTPS via proxy, cookie or API key"| UI["console<br/>dashboard/static"]
+```
+
+Two processes (`python main.py sensor`, `python main.py api`) share only the SQLite files. The API opens `alerts.db` read-only and owns `app.db`. Design reasons are in [docs/DESIGN.md](docs/DESIGN.md); a file-by-file trace of one packet is in [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md).
+
+## Detectors
+
+Defaults come from `config/settings.py`; the full list of settings is generated into [docs/OPERATIONS.md](docs/OPERATIONS.md). Time is packet time, not wall-clock time.
+
+| Detector | Fires when (defaults) | Evidence fields | Known evasions |
+| --- | --- | --- | --- |
+| Vertical scan (`detection/detectors/port_scan.py`) | One source sends TCP SYN to at least 10 distinct ports of one target within 10 s; 30 s cooldown | `unique_ports_observed`, `threshold`, `window_seconds`, `target_host`, `sample_ports` | Fewer than 10 ports per 10 s (see slow scan); non-SYN probes (FIN, NULL, Xmas, UDP); many sources each below the threshold |
+| Horizontal sweep (same file) | One source sends SYN to the same port on at least 10 distinct hosts within 10 s; 30 s cooldown | `unique_targets_observed`, `threshold`, `window_seconds`, `target_port`, `sample_targets` | Same as above; sweeping many ports across many hosts slowly |
+| Slow scan (`slow_scan.py`) | At least 20 distinct ports (or hosts) within 300 s; 60 s cooldown | `unique_ports_observed` or `unique_targets_observed`, `window_seconds`, `sample_ports` / `sample_targets` | Spreading probes over more than 300 s; distributing over sources; state eviction under a spoofed-source flood |
+| SYN flood (`syn_flood.py`) | At least 100 SYN/s to one (host, port) over a 5 s window and handshake completion ratio below 0.2; 30 s cooldown | `syn_rate_pps`, `total_syns`, `total_acks`, `completion_ratio`, `target_host`, `target_port` | Completing handshakes (connection flood); staying under 100 SYN/s per target; high-rate floods that leak ACKs to raise the ratio |
+| Volumetric (`volumetric.py`) | Packet or byte rate to one destination exceeds 5 times its EWMA baseline and a floor (1000 pps, 10 MB/s), or a hard ceiling (50,000 pps, 500 MB/s); baseline trusted after 3 windows | `packet_rate_pps`, `byte_rate_bps`, `ewma_pps`, `ewma_bps`, `top_talkers` | Ramping slowly so the baseline follows; staying under the floor; spreading over many destinations |
+
+Severity is `LOW`, `MEDIUM` or `HIGH` from the ratio of the observed value to the threshold (1x medium, 3x high; `detection/scoring.py`).
+
+## Results
+
+What these numbers are: a deterministic synthetic scenario suite (`eval/`) used as a regression net. It is **not** a real-world accuracy claim: perfect scores on scenarios written by the same author as the detectors show that the code does what it was written to do, nothing more. The one real-data experiment (flow-level ML on CIC-IDS2017) has not been run.
+
+<!-- RESULTS:BEGIN (generated by scripts/gen_readme_results.py) -->
+
+Command: `python main.py eval --scenarios all --out eval_output`  
+Commit: `1ae386f607c6cd650ae0f9e6fb84225da64657e9` plus uncommitted changes. Machine-dependent numbers (throughput, wall-clock) are from the machine that ran it.
+
+**Benchmark Status**: PASS  
+**Throughput**: 4,178-4,325 packets/sec (min-max of 3 runs; machine-dependent) | **Wall-Clock Time**: 68.74 s | **Total Packets**: 277,944  
+**Overall F1**: 1.0000 (Precision: 1.0000, Recall: 1.0000) | **False Alerts / Benign Hour**: 0.00
+
+#### Scenario Breakdown
+
+| Scenario | Packets | Duration (s) | Exp. Alerts | Act. Alerts | TP | FP | FN | F1 | Status |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `benign_web_browsing` | 70 | 7.6 | 0 | 0 | 0 | 0 | 0 | 1.00 | PASS |
+| `benign_bulk_download` | 252,003 | 60.0 | 0 | 0 | 0 | 0 | 0 | 1.00 | PASS |
+| `benign_lan_noise` | 100 | 10.2 | 0 | 0 | 0 | 0 | 0 | 1.00 | PASS |
+| `fast_vertical_scan` | 30 | 2.9 | 1 | 1 | 1 | 0 | 0 | 1.00 | PASS |
+| `horizontal_sweep` | 20 | 2.0 | 1 | 1 | 1 | 0 | 0 | 1.00 | PASS |
+| `slow_scan` | 25 | 125.0 | 1 | 1 | 1 | 0 | 0 | 1.00 | PASS |
+| `syn_flood_spoofed` | 600 | 3.0 | 1 | 1 | 1 | 0 | 0 | 1.00 | PASS |
+| `udp_flood_inbound` | 12,035 | 37.0 | 1 | 1 | 1 | 0 | 0 | 1.00 | PASS |
+| `mixed` | 13,061 | 600.0 | 5 | 5 | 5 | 0 | 0 | 1.00 | PASS |
+
+#### Detector Performance
+
+| Detector | TP | FP | FN | Precision | Recall | F1 Score | Mean TTD (s) | Max TTD (s) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **PORT_SCAN (VERTICAL)** | 2 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 | 0.89 | 0.90 |
+| **PORT_SCAN (HORIZONTAL)** | 2 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 | 0.90 | 0.94 |
+| **PORT_SCAN (SLOW)** | 2 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 | 95.00 | 95.00 |
+| **SYN_FLOOD** | 2 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 | 0.50 | 0.50 |
+| **VOLUMETRIC** | 2 | 0 | 0 | 1.0000 | 1.0000 | 1.0000 | 1.67 | 1.67 |
+
+ML gate (`docs/ML_REPORT.md`): **NOT RUN.**
+
+<!-- RESULTS:END -->
+
+Reproduce: run the command above, then `python scripts/gen_readme_results.py` rewrites this block from `eval_output/report.md`.
+
+## Security model
+
+Full analysis: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). In short:
+
+- **Default deny.** Every route is either `@public` or `@require(permission)` (`backend/auth.py`). Roles: admin, analyst, viewer; API keys can be viewer or analyst.
+- **Credentials.** Argon2id passwords, random server-side sessions (only a hash stored), lockout with growing delay, CSRF token plus Origin check, no CORS, hashed API keys, an append-only audit log.
+- **Least privilege.** The sensor needs `NET_RAW`; the API needs nothing and opens `alerts.db` read-only. Separate container targets.
+- **Browser.** Strict CSP with no inline script, DOM built with `textContent`, CSV formula-injection guard.
+- **Secrets.** The webhook URL, model key, passwords and tokens are never logged, audited or returned by the API.
+- **No TLS built in.** Put a reverse proxy in front for HTTPS and set `SENTINELX_HTTPS=true` and `SENTINELX_TRUSTED_PROXIES`.
+- **Checks in CI** (`.github/workflows/ci.yml`): ruff, mypy, bandit, pip-audit, pytest with a coverage floor, the scenario benchmark, Schemathesis against the OpenAPI spec, ZAP baseline, Trivy, gitleaks, compose integration and browser tests. Several of these jobs have not run on GitHub yet (see [CHANGELOG.md](CHANGELOG.md) and the final checklist in [docs/PROGRESS.md](docs/PROGRESS.md)).
+
+## Console
+
+Overview, live feed (SSE with polling fallback), alert list with filters and CSV/JSON export, detail drawer with triage, attack graph, sensor health, and admin pages for users, API keys and the audit log. Light and dark themes. Automated axe checks cover the automatable WCAG 2.1 AA rules; no screen-reader testing has been done.
+
+| | |
+| --- | --- |
+| ![Alert list](docs/img/alerts-dark.png) | ![Attack graph](docs/img/graph-dark.png) |
+| ![Sensor health](docs/img/health-dark.png) | ![Alert detail](docs/img/alert-drawer-dark.png) |
+
+These screenshots show fabricated demo data (`scripts/seed_demo.py`), not real traffic.
+
+## Operations
+
+Config reference (generated), backups, and runbooks for sensor offline, rising drops, DB growth, key rotation, a failing webhook and model retraining: [docs/OPERATIONS.md](docs/OPERATIONS.md). REST API: [docs/openapi.yaml](docs/openapi.yaml).
+
+Developer commands:
+
 ```bash
-python main.py
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                                   # default suite, coverage gate 82%
+pytest -m e2e tests/e2e                  # browser tests (needs Chrome or `playwright install chromium`)
+ruff check . && ruff format --check . && mypy .
+python main.py eval --scenarios all --out eval_output
+python scripts/gen_config_docs.py --check
 ```
 
-#### 2. Multi-Worker Execution
-Processes packets concurrently across multiple worker threads:
-```bash
-python main.py --workers 2
-```
+## Optional flow-level ML (off by default)
 
-#### 3. Specific Interface Capture
-Specifies a network interface by name:
-```bash
-python main.py --interface "Ethernet"
-```
+The v1 model was removed because it was trained on data produced by the same rules it confirmed. The replacement is a flow-level gradient-boosted model that may be enabled (`SENTINELX_ML=on`) only if a signed gate file says it beat rules-only on held-out real traffic. **Gate status: not run**, because the CIC-IDS2017 PCAPs were not available; ML stays off and adds no accuracy claim. Procedure: [docs/DATASET.md](docs/DATASET.md), features: [docs/ML_FEATURES.md](docs/ML_FEATURES.md), report: [docs/ML_REPORT.md](docs/ML_REPORT.md).
 
-#### 4. Offline PCAP Replay Mode
-Replays an existing packet capture file through the pipeline without requiring live network access:
-```bash
-python main.py --mode pcap --pcap path/to/sample.pcap
-```
+## Limitations
 
-Once started, access the Security Operations Console in your browser:
-```text
-http://127.0.0.1:5000/
-```
+- One CPU core on the packet path. Overload drops packets, which are counted and shown in the health view but never analysed.
+- Heuristics over TCP SYN, packet and byte rates only. No payload inspection and no encrypted-traffic analysis.
+- Evasions listed above are real. A patient or distributed scanner will not be seen.
+- Single sensor, single host, SQLite. No clustering or high availability.
+- Rate limits and login lockouts live in process memory.
+- Alert rows are not cryptographically signed.
+- Windows capture needs Npcap and Administrator rights; Docker capture works on Linux only.
+- No real-traffic accuracy figure exists for any detector.
 
----
+## Roadmap
 
-## Verification & Testing
+Not built, in rough order of value: run the Phase 5 data pipeline and publish the gate result; a real-traffic false-positive study on a home or lab network; sharding the engine by source for more than one core; shared rate-limit state for multiple API processes; signed alert export.
 
-SentinelX includes a comprehensive automated test suite with automated tests covering detection logic, the flow/ML code path, API contracts, security hardening, and multi-worker concurrency, along with automated CI quality gates:
+## Documentation
 
-```bash
-# Run the full test suite
-pytest -v
-
-# Run with quiet summary
-pytest -q
-
-# Run performance benchmarks
-pytest -s tests/test_performance_benchmark.py
-
-# Run code quality linting (Ruff)
-ruff check .
-
-# Run static application security testing (Bandit)
-bandit -c bandit.yaml -r backend capture config database detection eval logs ml scripts main.py
-
-# Run dependency vulnerability audit (pip-audit)
-pip-audit -r requirements.txt
-```
-
----
-
-## Project Structure
-
-```text
-SentinelX/
-├── backend/                  # Flask REST API and HTTP handlers
-│   └── api.py                # Endpoints, security headers, CORS, and query logic
-├── capture/                  # Packet acquisition and ingestion pipeline
-│   ├── packet_capture.py     # Scapy capture callback and sniffer control
-│   ├── packet_parser.py      # Resilient IPv4/IPv6 and protocol parsing
-│   ├── pcap_replay.py        # Offline PCAP replay functionality
-│   ├── pipeline.py           # Decoupled Producer-Consumer queue & worker threads
-│   └── metrics.py            # Throughput and drop rate accounting
-├── config/                   # Centralized configuration and environment settings
-│   └── settings.py           # Thresholds, timeouts, and security settings
-├── dashboard/                # Security operations console
-│   └── index.html            # Single-page dashboard with XSS-safe DOM rendering
-├── database/                 # SQLite storage layer
-│   ├── database.py           # Database connection management and schema migration
-│   └── sentinelx.db          # Production alert database
-├── detection/                # Stateful detection engines
-│   ├── engine.py             # Central DetectionEngine orchestrating all detectors
-│   ├── state_store.py        # Partitioned BoundedStateStore with LRU & event TTL
-│   ├── alert.py              # Strongly-typed Alert dataclass
-│   ├── utils.py              # Deterministic network & IP utilities
-│   ├── scoring.py            # Alert severity and confidence scoring
-│   └── detectors/            # Modular stateful detectors (port scan, slow scan, syn flood, volumetric)
-├── logs/                     # Alert persistence
-│   ├── alert_logger.py       # Append-only JSONL logger with automatic rotation
-│   └── alerts.json           # Legacy alert log
-├── ml/                       # Optional flow-level ML (default off, gated)
-│   ├── flows.py              # Shared flow extractor + feature definitions
-│   ├── dataset.py            # Attack-schedule loading and flow labelling
-│   ├── splits.py             # Leakage-safe split planner (day / time blocks / purge gaps)
-│   ├── model.py              # Train, calibrate, evaluate, permutation importance
-│   ├── artifact.py           # Signed skops artifacts, gate file, trusted types
-│   ├── runtime.py            # Additive-only serving hook (SENTINELX_ML=on)
-│   ├── evaluate.py           # Flow and alert-level metrics, decision gate
-│   ├── build.py, report.py   # PCAP -> flows.csv.gz, report rendering
-│   └── schedules/            # Published attack schedules (JSON)
-├── scripts/                  # build_flows.py, gen_ml_report.py, bench.py
-└── tests/                    # Automated test suite
-```
-
----
+[Walkthrough](docs/WALKTHROUGH.md) · [Design decisions](docs/DESIGN.md) · [Threat model](docs/THREAT_MODEL.md) · [Operations](docs/OPERATIONS.md) · [Changelog](CHANGELOG.md) · [Scenario suite](eval/README.md) · [OpenAPI](docs/openapi.yaml)
 
 ## License
-MIT License. See [LICENSE](LICENSE) for details.
+
+MIT. See [LICENSE](LICENSE).
