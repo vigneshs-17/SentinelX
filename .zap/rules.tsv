@@ -1,0 +1,3 @@
+# ZAP baseline rule overrides: <rule id>\tIGNORE|WARN|FAIL\t<justification comment>
+# The CI scan fails on medium or higher findings (every rule not listed here defaults to its ZAP level and the
+# workflow treats WARN as pass only for informational/low alerts). An entry here must say why it is acceptable.

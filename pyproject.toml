@@ -12,17 +12,15 @@ exclude = [
 
 [tool.ruff.lint]
 select = [
-    "E4",   # Import syntax errors
-    "E7",   # Statement errors
-    "E9",   # Runtime syntax errors
-    "F",    # Pyflakes core analysis
+    "E",    # pycodestyle errors
+    "F",    # Pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
 ]
 ignore = [
     "E501", # Line length (preserve existing functional layout)
-    "E402", # Module level import not at top of file
-    "F401", # Unused imports (preserve without rewriting working code)
-    "F841", # Unused local variables
-    "F541", # f-strings without placeholders
 ]
 
 [tool.pytest.ini_options]
@@ -31,3 +29,38 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = ["e2e: browser tests against a real API process; run with pytest -m e2e tests/e2e"]
+addopts = "-m 'not e2e'"
+
+[tool.mypy]
+python_version = "3.12"
+explicit_package_bases = true
+files = [
+    "backend",
+    "capture",
+    "config",
+    "database",
+    "detection",
+    "eval",
+    "logs",
+    "ml",
+    "main.py",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "scapy.*",
+    "joblib.*",
+    "sklearn.*",
+    "pandas.*",
+    "skops.*",
+    "waitress.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "ml/data/*",
+]

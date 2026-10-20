@@ -1,23 +1,21 @@
 import argparse
-from pathlib import Path
-import sys
 import time
+from pathlib import Path
 
 from scapy.all import PcapReader
 
-from capture.packet_capture import process_packet
 from capture.pipeline import PacketPipeline
 
 
 def replay_pcap(
     pcap_path: str,
-    pipeline_instance: PacketPipeline = None,
+    pipeline_instance: PacketPipeline | None = None,
     delay: float = 0.0,
     print_summary: bool = True,
 ) -> dict:
     """
     Replays a PCAP file through the SentinelX packet processing pipeline.
-    
+
     Streams packets sequentially into a bounded producer-consumer queue,
     allowing offline evaluation and testing without live network traffic
     or administrator privileges.
@@ -26,7 +24,7 @@ def replay_pcap(
     if not path.exists():
         raise FileNotFoundError(f"PCAP file not found: {pcap_path}")
 
-    active_pipeline = pipeline_instance or PacketPipeline(processor=process_packet)
+    active_pipeline = pipeline_instance or PacketPipeline()
 
     if print_summary:
         print("=" * 60)
@@ -34,7 +32,7 @@ def replay_pcap(
         print("=" * 60)
         print(f"[*] PCAP File : {path.resolve()}")
         print(f"[*] Queue Size: {active_pipeline.maxsize}")
-        print(f"[*] Workers   : {active_pipeline.worker_count}")
+        print("[*] Workers   : 1 (single-consumer)")
         print(f"[*] Delay/Pkt : {delay}s\n")
 
     active_pipeline.start()
@@ -85,7 +83,7 @@ def main():
 
     args = parser.parse_args()
 
-    pipeline_instance = PacketPipeline(worker_count=args.workers, processor=process_packet)
+    pipeline_instance = PacketPipeline(worker_count=args.workers)
     replay_pcap(args.pcap, pipeline_instance=pipeline_instance, delay=args.delay)
 
 

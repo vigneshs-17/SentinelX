@@ -1,18 +1,16 @@
 import time
-import pytest
+
 from scapy.all import IP, TCP
 
-from capture.pipeline import PacketPipeline
 from capture.packet_parser import parse_packet
-from detection.rule_engine import detect_port_scan, connection_tracker, last_scan_alert_time
-from detection.traffic_rules import detect_high_traffic, packet_tracker, alert_active
+from capture.pipeline import PacketPipeline
+from detection.engine import DetectionEngine
 
 
 def make_benchmark_packet(port: int):
-    return (
-        IP(src="192.168.1.50", dst="192.168.1.1")
-        / TCP(sport=40000 + (port % 1000), dport=port, flags="S")
-    )
+    pkt = IP(src="192.168.1.50", dst="192.168.1.1") / TCP(sport=40000 + (port % 1000), dport=port, flags="S")
+    pkt.time = 1000.0 + (port * 0.001)
+    return pkt
 
 
 def test_performance_benchmark_queue_vs_synchronous():
@@ -20,19 +18,14 @@ def test_performance_benchmark_queue_vs_synchronous():
     Controlled benchmark measuring producer latency:
     Compares synchronous processing overhead against non-blocking queue enqueue.
     """
-    connection_tracker.clear()
-    last_scan_alert_time.clear()
-    packet_tracker.clear()
-    alert_active.clear()
-
+    engine = DetectionEngine()
     packet_count = 500
     packets = [make_benchmark_packet(p) for p in range(packet_count)]
 
     # 1. Measure synchronous in-band processing
     def synchronous_handler(packet):
         data = parse_packet(packet)
-        detect_port_scan(data)
-        detect_high_traffic(data)
+        engine.process_packet(data)
 
     sync_start = time.perf_counter()
     for pkt in packets:
@@ -40,7 +33,7 @@ def test_performance_benchmark_queue_vs_synchronous():
     sync_duration = time.perf_counter() - sync_start
 
     # 2. Measure decoupled producer queue enqueue
-    pipeline = PacketPipeline(maxsize=10000, worker_count=1, processor=synchronous_handler)
+    pipeline = PacketPipeline(maxsize=10000, processor=synchronous_handler)
     pipeline.start()
 
     enqueue_start = time.perf_counter()

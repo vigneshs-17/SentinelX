@@ -1,8 +1,4 @@
-from database.database import (
-    initialize_database,
-    insert_alert,
-    get_connection
-)
+from database.database import get_connection, initialize_database, insert_alert
 
 
 def test_database():
@@ -16,7 +12,7 @@ def test_database():
         "source_ip": "192.168.1.100",
         "destination_ip": "192.168.1.10",
         "protocol": "TCP",
-        "message": "Test port scan alert"
+        "message": "Test port scan alert",
     }
 
     # Insert test alert
@@ -47,6 +43,7 @@ def test_database():
 if __name__ == "__main__":
     import os
     import tempfile
+
     with tempfile.TemporaryDirectory() as temp_dir:
         os.environ["SENTINELX_DB_PATH"] = os.path.join(temp_dir, "test.db")
         test_database()

@@ -1,0 +1,32 @@
+{
+  "dataset": "CIC-IDS2017",
+  "source_url": "https://www.unb.ca/cic/datasets/ids-2017.html",
+  "download_url": "http://cicresearch.ca/CICDataset/CIC-IDS-2017/",
+  "utc_offset_hours": -3,
+  "utc_offset_note": "ASSUMPTION: the CIC page prints local lab times with no timezone. Fredericton NB in July is Atlantic Daylight Time (UTC-3). Verify with the per-window label counts printed by scripts/build_flows.py and override with --utc-offset-hours if a window labels zero flows.",
+  "nat_note": "ASSUMPTION: the PCAPs are captured inside the victim network, so external attackers (205.174.165.x) appear as the firewall NAT address 172.16.0.1. Both forms are accepted as attacker aliases.",
+  "attacker_aliases": ["172.16.0.1"],
+  "windows": [
+    {"date": "2017-07-04", "class": "FTP-Patator", "start": "09:20", "end": "10:20", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-04", "class": "SSH-Patator", "start": "14:00", "end": "15:00", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-05", "class": "DoS-slowloris", "start": "09:47", "end": "10:10", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-05", "class": "DoS-Slowhttptest", "start": "10:14", "end": "10:35", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-05", "class": "DoS-Hulk", "start": "10:43", "end": "11:00", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-05", "class": "DoS-GoldenEye", "start": "11:10", "end": "11:23", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-05", "class": "Heartbleed", "start": "15:12", "end": "15:32", "attackers": ["205.174.165.73"], "victims": ["205.174.165.66", "192.168.10.51"]},
+    {"date": "2017-07-06", "class": "WebAttack-BruteForce", "start": "09:20", "end": "10:00", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-06", "class": "WebAttack-XSS", "start": "10:15", "end": "10:35", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-06", "class": "WebAttack-SQLi", "start": "10:40", "end": "10:42", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-06", "class": "Infiltration", "start": "14:19", "end": "14:21", "attackers": ["205.174.165.73"], "victims": ["192.168.10.8"]},
+    {"date": "2017-07-06", "class": "Infiltration", "start": "14:33", "end": "14:35", "attackers": ["205.174.165.73"], "victims": ["192.168.10.8"]},
+    {"date": "2017-07-06", "class": "Infiltration", "start": "14:53", "end": "15:00", "attackers": ["205.174.165.73"], "victims": ["192.168.10.25"]},
+    {"date": "2017-07-06", "class": "Infiltration", "start": "15:04", "end": "15:45", "attackers": ["205.174.165.73"], "victims": ["192.168.10.8"]},
+    {"date": "2017-07-06", "class": "Infiltration", "start": "15:04", "end": "15:45", "attackers": ["192.168.10.8"], "victims": ["192.168.10.0/24"], "attacker_aliases": false},
+    {"date": "2017-07-07", "class": "Botnet", "start": "10:02", "end": "11:02", "attackers": ["205.174.165.73"], "victims": ["192.168.10.15", "192.168.10.9", "192.168.10.14", "192.168.10.5", "192.168.10.8"]},
+    {"date": "2017-07-07", "class": "PortScan", "start": "13:55", "end": "14:24", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-07", "class": "PortScan", "start": "14:33", "end": "14:34", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-07", "class": "PortScan", "start": "14:35", "end": "14:36", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-07", "class": "PortScan", "start": "14:51", "end": "15:29", "attackers": ["205.174.165.73"], "victims": ["205.174.165.68", "192.168.10.50"]},
+    {"date": "2017-07-07", "class": "DDoS", "start": "15:56", "end": "16:16", "attackers": ["205.174.165.69", "205.174.165.70", "205.174.165.71"], "victims": ["205.174.165.68", "192.168.10.50"]}
+  ]
+}

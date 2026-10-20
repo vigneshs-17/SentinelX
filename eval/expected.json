@@ -1,0 +1,67 @@
+{
+  "benign_web_browsing": [],
+  "benign_bulk_download": [],
+  "benign_lan_noise": [],
+  "fast_vertical_scan": [
+    {
+      "threat_type": "PORT_SCAN",
+      "scan_type": "VERTICAL",
+      "count": 1
+    }
+  ],
+  "horizontal_sweep": [
+    {
+      "threat_type": "PORT_SCAN",
+      "scan_type": "HORIZONTAL",
+      "count": 1
+    }
+  ],
+  "slow_scan": [
+    {
+      "threat_type": "PORT_SCAN",
+      "scan_type": "SLOW",
+      "count": 1
+    }
+  ],
+  "syn_flood_spoofed": [
+    {
+      "threat_type": "SYN_FLOOD",
+      "scan_type": null,
+      "count": 1
+    }
+  ],
+  "udp_flood_inbound": [
+    {
+      "threat_type": "VOLUMETRIC",
+      "scan_type": null,
+      "count": 1
+    }
+  ],
+  "mixed": [
+    {
+      "threat_type": "PORT_SCAN",
+      "scan_type": "VERTICAL",
+      "count": 1
+    },
+    {
+      "threat_type": "PORT_SCAN",
+      "scan_type": "HORIZONTAL",
+      "count": 1
+    },
+    {
+      "threat_type": "PORT_SCAN",
+      "scan_type": "SLOW",
+      "count": 1
+    },
+    {
+      "threat_type": "SYN_FLOOD",
+      "scan_type": null,
+      "count": 1
+    },
+    {
+      "threat_type": "VOLUMETRIC",
+      "scan_type": null,
+      "count": 1
+    }
+  ]
+}

@@ -1,23 +1,19 @@
 import hashlib
-import json
 import os
 from pathlib import Path
-import pytest
 
 from backend.api import app
 from config.settings import (
-    THREAT_TYPE_PORT_SCAN,
-    THREAT_TYPE_HIGH_TRAFFIC,
     CANONICAL_THREAT_TYPES,
+    THREAT_TYPE_PORT_SCAN,
+    THREAT_TYPE_VOLUMETRIC,
 )
 from database.database import (
     get_connection,
     insert_alert,
-    initialize_database,
-    DEFAULT_DATABASE_FILE,
 )
-from logs.alert_logger import log_alert, DEFAULT_ALERT_FILE
-
+from logs.alert_logger import log_alert
+from tests.support import authed_client
 
 PROD_DB_FILE = Path(__file__).resolve().parent.parent / "database" / "sentinelx.db"
 PROD_ALERT_FILE = Path(__file__).resolve().parent.parent / "logs" / "alerts.json"
@@ -84,36 +80,42 @@ class TestPhase1Regression:
     def test_canonical_threat_types_and_stats_api(self):
         """Verify threat statistics query canonical threat types accurately without phantom types."""
         # Insert known test records into the isolated database
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:00",
-            "threat_type": THREAT_TYPE_PORT_SCAN,
-            "severity": "HIGH",
-            "source_ip": "192.168.1.50",
-            "destination_ip": "192.168.1.1",
-            "protocol": "TCP",
-            "message": "Port scan 1",
-        })
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:01",
-            "threat_type": THREAT_TYPE_PORT_SCAN,
-            "severity": "LOW",
-            "source_ip": "192.168.1.51",
-            "destination_ip": "192.168.1.1",
-            "protocol": "TCP",
-            "message": "Port scan 2",
-        })
-        insert_alert({
-            "timestamp": "2026-09-11T12:00:02",
-            "threat_type": THREAT_TYPE_HIGH_TRAFFIC,
-            "severity": "HIGH",
-            "source_ip": "192.168.1.60",
-            "destination_ip": "192.168.1.1",
-            "protocol": "UDP",
-            "message": "High traffic 1",
-        })
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:00",
+                "threat_type": THREAT_TYPE_PORT_SCAN,
+                "severity": "HIGH",
+                "source_ip": "192.168.1.50",
+                "destination_ip": "192.168.1.1",
+                "protocol": "TCP",
+                "message": "Port scan 1",
+            }
+        )
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:01",
+                "threat_type": THREAT_TYPE_PORT_SCAN,
+                "severity": "LOW",
+                "source_ip": "192.168.1.51",
+                "destination_ip": "192.168.1.1",
+                "protocol": "TCP",
+                "message": "Port scan 2",
+            }
+        )
+        insert_alert(
+            {
+                "timestamp": "2026-09-11T12:00:02",
+                "threat_type": THREAT_TYPE_VOLUMETRIC,
+                "severity": "HIGH",
+                "source_ip": "192.168.1.60",
+                "destination_ip": "192.168.1.1",
+                "protocol": "UDP",
+                "message": "High traffic 1",
+            }
+        )
 
-        client = app.test_client()
-        response = client.get("/api/stats")
+        client = authed_client(app)
+        response = client.get("/api/v1/stats")
         assert response.status_code == 200
         stats = response.get_json()
 
@@ -124,21 +126,17 @@ class TestPhase1Regression:
 
         # Verify CANONICAL_THREAT_TYPES
         assert THREAT_TYPE_PORT_SCAN in CANONICAL_THREAT_TYPES
-        assert THREAT_TYPE_HIGH_TRAFFIC in CANONICAL_THREAT_TYPES
+        assert THREAT_TYPE_VOLUMETRIC in CANONICAL_THREAT_TYPES
         assert "ML_PORT_SCAN" not in CANONICAL_THREAT_TYPES
         assert "ML_HIGH_TRAFFIC" not in CANONICAL_THREAT_TYPES
 
     def test_dashboard_xss_protection_source_code(self):
-        """Verify dashboard/index.html uses textContent and createElement instead of unsafe innerHTML for alert rendering."""
-        dashboard_html_path = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
-        assert dashboard_html_path.exists()
-
-        content = dashboard_html_path.read_text(encoding="utf-8")
-
-        # Must not have innerHTML inside alerts.forEach
-        assert "row.innerHTML =" not in content, "Found unsafe row.innerHTML in dashboard/index.html!"
-        # Must have textContent assignments
-        assert "cell.textContent =" in content, "Expected cell.textContent assignment for safe DOM rendering"
+        """The console builds every node with createElement/textContent; no markup-parsing sink exists in any asset."""
+        static = Path(__file__).resolve().parent.parent / "dashboard" / "static"
+        sources = "\n".join(p.read_text(encoding="utf-8") for p in sorted(static.rglob("*.js")))
+        assert sources
+        assert "innerHTML" not in sources and "outerHTML" not in sources
+        assert "textContent" in sources and "createElement" in sources
 
     def test_stored_xss_payload_safety_in_api(self):
         """Verify XSS vectors stored in database are cleanly returned as JSON and not executable markup."""
@@ -154,8 +152,8 @@ class TestPhase1Regression:
         }
         insert_alert(alert_record)
 
-        client = app.test_client()
-        response = client.get("/api/alerts")
+        client = authed_client(app)
+        response = client.get("/api/v1/alerts")
         assert response.status_code == 200
         alerts = response.get_json()
 
@@ -169,7 +167,11 @@ class TestPhase1Regression:
         req_file = Path(__file__).resolve().parent.parent / "requirements.txt"
         content = req_file.read_text(encoding="utf-8")
         assert "Flask==" in content
-        assert "pytest==" in content
+        assert "Werkzeug==" in content
+
+        req_dev_file = Path(__file__).resolve().parent.parent / "requirements-dev.txt"
+        dev_content = req_dev_file.read_text(encoding="utf-8")
+        assert "pytest==" in dev_content
 
         # Verify Unicode text can be inserted and retrieved from SQLite and alert logger without crash
         unicode_message = "Alerte de sécurité: Détection d'anomalie réseau 🛡️ (port scan)"
@@ -185,6 +187,7 @@ class TestPhase1Regression:
         assert saved["message"] == unicode_message
 
         # Verify it reads back from the isolated JSON file cleanly
-        with open(os.getenv("SENTINELX_ALERT_LOG"), "r", encoding="utf-8") as f:
-            data = json.load(f)
-            assert any(item.get("message") == unicode_message for item in data)
+        from logs.alert_logger import read_alerts
+
+        data = read_alerts()
+        assert any(item.get("message") == unicode_message for item in data)

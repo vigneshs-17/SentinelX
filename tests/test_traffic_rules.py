@@ -1,145 +1,147 @@
-from detection.traffic_rules import (
-    detect_high_traffic,
-    packet_tracker,
-    alert_active,
+import threading
+
+from config.settings import (
+    THREAT_TYPE_VOLUMETRIC,
 )
+from detection.engine import DetectionEngine
 
 
-def create_packet(
-    source_ip="192.168.1.100",
-    destination_ip="192.168.1.10"
-):
+def create_packet(source_ip="192.168.1.100", destination_ip="192.168.1.10", ts=1000.0, size=60):
     return {
+        "ts": ts,
         "source_ip": source_ip,
         "destination_ip": destination_ip,
         "protocol": "TCP",
         "source_port": 50000,
         "destination_port": 443,
-        "packet_size": 60
+        "packet_size": size,
     }
 
 
 def test_normal_traffic():
-    packet_tracker.clear()
-    alert_active.clear()
-
+    engine = DetectionEngine()
     packet_data = create_packet()
 
-    alert = None
+    alerts = []
+    for i in range(100):
+        pkt = dict(packet_data)
+        pkt["ts"] = 1000.0 + (i * 0.1)
+        res = engine.process_packet(pkt)
+        if res:
+            alerts.extend(res)
 
-    for _ in range(100):
-        alert = detect_high_traffic(packet_data)
-
-    assert alert is None
-
+    assert len(alerts) == 0
     print("Normal traffic test passed!")
 
 
 def test_multicast_traffic():
-    packet_tracker.clear()
-    alert_active.clear()
+    engine = DetectionEngine()
+    packet_data = create_packet(destination_ip="224.0.0.251")
 
-    packet_data = create_packet(
-        destination_ip="224.0.0.251"
-    )
-
-    alert = detect_high_traffic(packet_data)
-
-    assert alert is None
-
+    res = engine.process_packet(packet_data)
+    assert len(res) == 0
     print("Multicast traffic test passed!")
 
 
 def test_non_tcp_udp_traffic():
-    packet_tracker.clear()
-    alert_active.clear()
-
+    engine = DetectionEngine()
     packet_data = create_packet()
-    packet_data["protocol"] = "IP"
+    packet_data["protocol"] = "OTHER"
 
-    alert = detect_high_traffic(packet_data)
-
-    assert alert is None
-
+    res = engine.process_packet(packet_data)
+    assert len(res) == 0
     print("Non-TCP/UDP traffic test passed!")
 
 
 def test_high_traffic_detection():
-    packet_tracker.clear()
-    alert_active.clear()
-
-    packet_data = create_packet()
+    # Configure low floor to trigger volumetric alert deterministically in test
+    engine = DetectionEngine(
+        config={
+            "VOLUMETRIC_FLOOR_PPS": 100.0,
+            "VOLUMETRIC_MIN_PACKETS": 200,
+            "VOLUMETRIC_WARMUP_WINDOWS": 0,
+        }
+    )
 
     first_alert = None
+    alerts_seen = []
 
-    for _ in range(1000):
-        alert = detect_high_traffic(packet_data)
-
-        if alert is not None:
-            first_alert = alert
+    for i in range(250):
+        pkt = create_packet(ts=2000.0 + (i * 0.004))  # 250 pps
+        res = engine.process_packet(pkt)
+        for a in res:
+            if a.threat_type == THREAT_TYPE_VOLUMETRIC:
+                alerts_seen.append(a)
+                if first_alert is None:
+                    first_alert = a.to_dict()
 
     assert first_alert is not None
-    assert first_alert["threat_type"] == "HIGH_TRAFFIC"
-    assert first_alert["severity"] == "HIGH"
-    assert first_alert["packet_count"] >= 1000
+    assert first_alert["threat_type"] == THREAT_TYPE_VOLUMETRIC
+    assert first_alert["severity"] in ("MEDIUM", "HIGH")
+    assert first_alert["evidence"]["packet_count"] >= 200
 
-    # Additional high-traffic packets should not create another alert
-    duplicate_alert = detect_high_traffic(packet_data)
-
-    assert duplicate_alert is None
+    # Additional high-traffic packets during cooldown must be suppressed
+    extra_pkt = create_packet(ts=2001.5)
+    duplicate_res = engine.process_packet(extra_pkt)
+    vol_dups = [a for a in duplicate_res if a.threat_type == THREAT_TYPE_VOLUMETRIC]
+    assert len(vol_dups) == 0
 
     print("High traffic detection test passed!")
     print("Active alert suppression test passed!")
 
 
 def test_high_traffic_byte_rate_detection():
-    """Verify byte-rate volumetric threshold: 50 packets of 250KB exceed 2MB/s threshold."""
-    packet_tracker.clear()
-    alert_active.clear()
-
-    src = "192.168.1.222"
-    pkt = create_packet(source_ip=src)
-    pkt["packet_size"] = 250000  # 250 KB
+    """Verify byte-rate volumetric threshold."""
+    engine = DetectionEngine(
+        config={
+            "VOLUMETRIC_FLOOR_BPS": 1000000.0,  # 1 MB/s
+            "VOLUMETRIC_MIN_PACKETS": 200,
+            "VOLUMETRIC_WARMUP_WINDOWS": 0,
+        }
+    )
 
     first_alert = None
-    for _ in range(50):
-        alert = detect_high_traffic(pkt)
-        if alert is not None and first_alert is None:
-            first_alert = alert
+    for i in range(250):
+        pkt = create_packet(ts=3000.0 + (i * 0.004), size=50000)  # 50 KB * 250 = 12.5 MB in 1s
+        res = engine.process_packet(pkt)
+        for a in res:
+            if a.threat_type == THREAT_TYPE_VOLUMETRIC and first_alert is None:
+                first_alert = a.to_dict()
 
     assert first_alert is not None
-    assert first_alert["threat_type"] == "HIGH_TRAFFIC"
-    assert first_alert["evidence"]["byte_rate_bps"] >= 2000000.0
-    assert first_alert["packet_count"] == 50
+    assert first_alert["threat_type"] == THREAT_TYPE_VOLUMETRIC
+    assert first_alert["evidence"]["byte_rate_bps"] >= 1000000.0
 
 
 def test_multi_worker_concurrency_same_source_ip():
     """
-    Concurrency test simulating SENTINELX_WORKERS=2:
-    Two concurrent worker threads process high-rate traffic from the SAME source IP.
-    Verifies that _traffic_history is synchronized and zero 'deque mutated during iteration' occurs.
+    Concurrency test: two concurrent worker threads process high-rate traffic.
+    Verifies thread-safe processing and reliable alert generation.
     """
-    import threading
-    packet_tracker.clear()
-    alert_active.clear()
-
-    src = "192.168.100.99"
-    pkt = create_packet(source_ip=src)
+    engine = DetectionEngine(
+        config={
+            "VOLUMETRIC_FLOOR_PPS": 100.0,
+            "VOLUMETRIC_MIN_PACKETS": 200,
+            "VOLUMETRIC_WARMUP_WINDOWS": 0,
+        }
+    )
     errors = []
     alerts = []
+    barrier = threading.Barrier(2)
 
     def worker_loop(thread_id, count):
-        for _ in range(count):
+        barrier.wait()
+        for i in range(count):
+            pkt = create_packet(source_ip="192.168.100.99", ts=4000.0 + (i * 0.002))
             try:
-                a = detect_high_traffic(pkt)
-                if a is not None:
-                    alerts.append(a)
+                res = engine.process_packet(pkt)
+                if res:
+                    alerts.extend(res)
             except Exception as exc:
                 errors.append(f"Thread-{thread_id}: {exc}")
 
-    # Launch 2 concurrent threads generating 1,000 packets each
-    t1 = threading.Thread(target=worker_loop, args=(1, 1000))
-    t2 = threading.Thread(target=worker_loop, args=(2, 1000))
+    t1 = threading.Thread(target=worker_loop, args=(1, 300))
+    t2 = threading.Thread(target=worker_loop, args=(2, 300))
 
     t1.start()
     t2.start()
@@ -152,21 +154,19 @@ def test_multi_worker_concurrency_same_source_ip():
 
 def test_multi_worker_concurrency_multiple_source_ips():
     """
-    Concurrency test simulating 4 concurrent worker threads processing traffic
-    across 10 distinct source IPs simultaneously.
+    Concurrency test across 10 distinct source IPs simultaneously.
     """
-    import threading
-    packet_tracker.clear()
-    alert_active.clear()
-
+    engine = DetectionEngine()
     errors = []
+    barrier = threading.Barrier(4)
 
     def worker_loop(thread_id):
+        barrier.wait()
         for i in range(250):
             src_ip = f"10.50.0.{i % 10}"
-            pkt = create_packet(source_ip=src_ip)
+            pkt = create_packet(source_ip=src_ip, ts=5000.0 + (i * 0.01))
             try:
-                detect_high_traffic(pkt)
+                engine.process_packet(pkt)
             except Exception as exc:
                 errors.append(f"Worker-{thread_id} IP-{src_ip}: {exc}")
 
@@ -180,26 +180,22 @@ def test_multi_worker_concurrency_multiple_source_ips():
 
 
 def test_bounded_state_and_cleanup():
-    """Verify that cleanup_traffic_state purges stale tracking entries to prevent unbounded memory growth."""
-    import time
-    from detection.traffic_rules import cleanup_traffic_state, _traffic_history
+    """Verify that state store evicts expired entries using event-time clock."""
+    engine = DetectionEngine(config={"DETECTION_STATE_TTL": 60.0})
 
-    packet_tracker.clear()
-    alert_active.clear()
-    _traffic_history.clear()
-
-    now = time.time()
-    # Seed 20 distinct IPs
+    base_ts = 6000.0
+    # Seed 20 distinct destination IPs
     for i in range(20):
-        pkt = create_packet(source_ip=f"10.99.0.{i}")
-        detect_high_traffic(pkt)
+        pkt = create_packet(destination_ip=f"10.99.0.{i}", ts=base_ts + i)
+        engine.process_packet(pkt)
 
-    assert len(_traffic_history) == 20
+    v_store = engine.state_store.get_partition("volumetric")
+    assert v_store.size() == 20
 
-    # Advance time by 120 seconds (beyond DETECTION_STATE_TTL=60s)
-    purged = cleanup_traffic_state(now=now + 120.0, ttl=60.0)
-    assert purged == 20
-    assert len(_traffic_history) == 0
+    # Advance clock by 120 seconds (beyond DETECTION_STATE_TTL=60s)
+    evicted = engine.cleanup_expired(base_ts + 120.0)
+    assert evicted["volumetric"] == 20
+    assert v_store.size() == 0
 
 
 if __name__ == "__main__":
@@ -211,5 +207,4 @@ if __name__ == "__main__":
     test_multi_worker_concurrency_same_source_ip()
     test_multi_worker_concurrency_multiple_source_ips()
     test_bounded_state_and_cleanup()
-
     print("\nAll traffic rule tests passed!")

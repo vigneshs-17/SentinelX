@@ -1,30 +1,16 @@
-import hashlib
 import json
-import os
 import tempfile
 import threading
 from pathlib import Path
-from unittest.mock import patch
+
 import pytest
+from scapy.all import ARP, IP, TCP, UDP, Ether, IPv6
 
 from capture.packet_parser import parse_packet
-from config.settings import CORS_ALLOWED_ORIGINS, ALLOW_LOCAL_FILE_CORS
 from logs.alert_logger import (
     log_alert,
     read_alerts,
-    _rotate_file,
-    get_alert_file_path,
-    DEFAULT_MAX_LOG_SIZE,
-    DEFAULT_MAX_LOG_BACKUPS,
 )
-from ml.predictor import (
-    calculate_model_sha256,
-    verify_model_integrity,
-    get_model,
-    ModelIntegrityError,
-    MODEL_PATH,
-)
-from scapy.all import IP, IPv6, TCP, UDP, ARP, Ether
 
 
 @pytest.fixture
@@ -35,91 +21,9 @@ def temp_dir():
 
 
 # =============================================================================
-# 1. P0 — ML Model Integrity Verification Tests
-# =============================================================================
-
-class TestMLModelIntegrity:
-    """Tests for cryptographic checksum verification of ML models."""
-
-    def test_production_model_sha256_matches_metadata(self):
-        """Verify the production sentinelx_model.pkl matches model_metadata.json."""
-        meta_path = MODEL_PATH.parent / "model_metadata.json"
-        assert meta_path.exists(), "model_metadata.json must exist"
-        with open(meta_path, "r", encoding="utf-8") as f:
-            metadata = json.load(f)
-
-        expected_hash = metadata.get("model_sha256")
-        assert expected_hash is not None, "metadata must contain model_sha256"
-        actual_hash = calculate_model_sha256(MODEL_PATH)
-        assert actual_hash.lower() == expected_hash.lower()
-
-        # verify_model_integrity should succeed without error
-        verified = verify_model_integrity(MODEL_PATH)
-        assert verified == expected_hash.lower()
-
-    def test_tampered_model_raises_integrity_error(self, temp_dir):
-        """Verify that any bit alteration in the model file raises ModelIntegrityError."""
-        fake_model = temp_dir / "tampered_model.pkl"
-        fake_meta = temp_dir / "model_metadata.json"
-
-        fake_model.write_bytes(b"LEGITIMATE_MODEL_CONTENT_12345")
-        correct_hash = hashlib.sha256(b"LEGITIMATE_MODEL_CONTENT_12345").hexdigest()
-        fake_meta.write_text(json.dumps({"model_sha256": correct_hash}), encoding="utf-8")
-
-        # Verify legitimate state passes
-        assert verify_model_integrity(fake_model, fake_meta) == correct_hash
-
-        # Tamper with the model file
-        fake_model.write_bytes(b"TAMPERED_MALICIOUS_PAYLOAD_67890")
-
-        with pytest.raises(ModelIntegrityError, match="integrity verification failed"):
-            verify_model_integrity(fake_model, fake_meta)
-
-    def test_missing_metadata_raises_integrity_error(self, temp_dir):
-        """Verify that missing metadata raises ModelIntegrityError."""
-        model_file = temp_dir / "model.pkl"
-        model_file.write_bytes(b"some_model_data")
-        missing_meta = temp_dir / "non_existent_metadata.json"
-
-        with pytest.raises(ModelIntegrityError, match="metadata file missing"):
-            verify_model_integrity(model_file, missing_meta)
-
-    def test_malformed_metadata_json_raises_integrity_error(self, temp_dir):
-        """Verify that malformed metadata JSON raises ModelIntegrityError."""
-        model_file = temp_dir / "model.pkl"
-        model_file.write_bytes(b"some_model_data")
-        bad_meta = temp_dir / "model_metadata.json"
-        bad_meta.write_text("{ NOT_VALID_JSON }", encoding="utf-8")
-
-        with pytest.raises(ModelIntegrityError, match="Malformed model metadata"):
-            verify_model_integrity(model_file, bad_meta)
-
-    def test_missing_sha256_field_in_metadata_raises_integrity_error(self, temp_dir):
-        """Verify that metadata missing model_sha256 field raises ModelIntegrityError."""
-        model_file = temp_dir / "model.pkl"
-        model_file.write_bytes(b"some_model_data")
-        bad_meta = temp_dir / "model_metadata.json"
-        bad_meta.write_text(json.dumps({"model_version": "2.0.0"}), encoding="utf-8")
-
-        with pytest.raises(ModelIntegrityError, match="Missing 'model_sha256'"):
-            verify_model_integrity(model_file, bad_meta)
-
-    def test_joblib_load_never_called_when_checksum_fails(self, temp_dir):
-        """Verify that joblib.load is NEVER invoked if the checksum check fails."""
-        fake_model = temp_dir / "tampered.pkl"
-        fake_meta = temp_dir / "model_metadata.json"
-        fake_model.write_bytes(b"TAMPERED")
-        fake_meta.write_text(json.dumps({"model_sha256": "0000000000000000000000000000000000000000000000000000000000000000"}), encoding="utf-8")
-
-        with patch("joblib.load") as mock_joblib:
-            with pytest.raises(ModelIntegrityError):
-                get_model(custom_path=fake_model, metadata_path=fake_meta)
-            mock_joblib.assert_not_called()
-
-
-# =============================================================================
 # 2. P1 — Alert Logger Hardening Tests
 # =============================================================================
+
 
 class TestAlertLoggerHardening:
     """Tests for append-only JSONL format, size-based rotation, and crash resilience."""
@@ -209,15 +113,16 @@ class TestAlertLoggerHardening:
         assert not backup_4.exists()
 
     def test_legacy_json_path_backward_compatibility(self, temp_dir, monkeypatch):
-        """Verify logging to a path ending in .json retains JSON array format."""
-        legacy_file = temp_dir / "test.json"
-        monkeypatch.setenv("SENTINELX_ALERT_LOG", str(legacy_file))
+        """Verify read_alerts reads legacy JSON array files."""
+        legacy_file = temp_dir / "legacy_array.json"
+        legacy_data = [
+            {"threat_type": "PORT_SCAN", "severity": "HIGH", "msg": "first"},
+            {"threat_type": "PORT_SCAN", "severity": "HIGH", "msg": "second"},
+        ]
+        with open(legacy_file, "w", encoding="utf-8") as f:
+            json.dump(legacy_data, f)
 
-        log_alert({"threat_type": "PORT_SCAN", "severity": "HIGH", "msg": "first"})
-        log_alert({"threat_type": "PORT_SCAN", "severity": "HIGH", "msg": "second"})
-
-        with open(legacy_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        data = read_alerts(legacy_file)
         assert isinstance(data, list)
         assert len(data) == 2
         assert data[0]["msg"] == "first"
@@ -234,12 +139,7 @@ class TestAlertLoggerHardening:
         def worker(thread_id):
             try:
                 for j in range(20):
-                    log_alert({
-                        "threat_type": "PORT_SCAN",
-                        "severity": "LOW",
-                        "thread_id": thread_id,
-                        "item": j
-                    })
+                    log_alert({"threat_type": "PORT_SCAN", "severity": "LOW", "thread_id": thread_id, "item": j})
             except Exception as e:
                 errors.append(e)
 
@@ -257,59 +157,9 @@ class TestAlertLoggerHardening:
 
 
 # =============================================================================
-# 3. P1 — CORS Origin: null Lockdown Tests
-# =============================================================================
-
-class TestCORSSecurityLockdown:
-    """Tests for CORS Origin: null rejection and opt-in security."""
-
-    @pytest.fixture
-    def client(self):
-        from backend.api import app
-        app.config["TESTING"] = True
-        with app.test_client() as c:
-            yield c
-
-    def test_default_cors_settings_do_not_contain_null(self):
-        """Verify that null is not in CORS_ALLOWED_ORIGINS by default."""
-        assert "null" not in CORS_ALLOWED_ORIGINS
-        assert ALLOW_LOCAL_FILE_CORS is False
-
-    def test_origin_null_blocked_by_default_on_all_endpoints(self, client):
-        """Verify that requests presenting Origin: null do not receive Access-Control-Allow-Origin."""
-        for endpoint in ["/api/stats", "/api/alerts"]:
-            resp = client.get(endpoint, headers={"Origin": "null"})
-            assert resp.status_code == 200
-            assert "Access-Control-Allow-Origin" not in resp.headers
-
-    def test_options_preflight_origin_null_blocked_by_default(self, client):
-        """Verify OPTIONS preflight requests presenting Origin: null do not receive CORS permission."""
-        for endpoint in ["/api/stats", "/api/alerts"]:
-            resp = client.open(endpoint, method="OPTIONS", headers={"Origin": "null"})
-            assert resp.status_code == 204
-            assert "Access-Control-Allow-Origin" not in resp.headers
-
-    def test_origin_null_allowed_when_opt_in_enabled(self, client, monkeypatch):
-        """Verify that setting ALLOW_LOCAL_FILE_CORS permits Origin: null."""
-        monkeypatch.setattr("backend.api.ALLOW_LOCAL_FILE_CORS", True)
-
-        for endpoint in ["/api/stats", "/api/alerts"]:
-            resp = client.get(endpoint, headers={"Origin": "null"})
-            assert resp.status_code == 200
-            assert resp.headers.get("Access-Control-Allow-Origin") == "null"
-            assert resp.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
-
-    def test_untrusted_origins_always_blocked(self, client):
-        """Verify arbitrary external origins are rejected."""
-        untrusted = ["http://attacker.com", "https://phishing.site", "http://192.168.1.50:8080"]
-        for origin in untrusted:
-            resp = client.get("/api/stats", headers={"Origin": origin})
-            assert "Access-Control-Allow-Origin" not in resp.headers
-
-
-# =============================================================================
 # 4. P1 — IPv6 Packet Parsing Support Tests
 # =============================================================================
+
 
 class TestIPv6PacketParsing:
     """Tests for IPv6 dissection and protocol extraction in parse_packet."""

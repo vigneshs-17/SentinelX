@@ -1,0 +1,558 @@
+openapi: 3.1.0
+info:
+  title: SentinelX API
+  version: 2.0.0
+  description: |
+    REST + Server-Sent Events API of the SentinelX API process. The sensor writes alerts.db; this process opens it
+    read-only and owns app.db (users, sessions, API keys, triage, audit log).
+
+    Authentication is either a browser session (cookie `sx_session` plus `X-CSRF-Token` on every write) or an API
+    key (`Authorization: Bearer sx_...`, no cookies, no CSRF token). Roles: viewer (read), analyst (viewer + triage),
+    admin (analyst + users, API keys, audit log). Every `/api/v1/*` response carries `RateLimit-Limit`,
+    `RateLimit-Remaining` and `RateLimit-Reset`; exceeding the limit returns 429 with `Retry-After`.
+    Unknown query parameters are rejected with 400. All errors use the Error envelope.
+servers:
+  - url: http://127.0.0.1:5000
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+    csrfHeader: []
+tags:
+  - name: public
+  - name: alerts
+  - name: operations
+  - name: admin
+paths:
+  /health:
+    get:
+      tags: [public]
+      summary: Liveness and readiness probe
+      security: []
+      responses:
+        "200": {description: Healthy, content: {application/json: {schema: {$ref: "#/components/schemas/Health"}}}}
+        "503": {description: alerts.db not readable, content: {application/json: {schema: {$ref: "#/components/schemas/Health"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+  /login:
+    post:
+      tags: [public]
+      summary: Start a browser session
+      description: Sets the `sx_session` cookie (HttpOnly, SameSite=Strict) and returns the CSRF token. The error never says whether the username or the password was wrong.
+      security: []
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/LoginRequest"}}}
+      responses:
+        "200": {description: Logged in, content: {application/json: {schema: {$ref: "#/components/schemas/LoginResponse"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+  /api/v1/logout:
+    post:
+      tags: [operations]
+      summary: End the current browser session
+      responses:
+        "204": {description: Session deleted}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+  /api/v1/session:
+    get:
+      tags: [operations]
+      summary: Identity of the caller (and the CSRF token for cookie sessions)
+      responses:
+        "200": {description: Caller, content: {application/json: {schema: {$ref: "#/components/schemas/Session"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+  /api/v1/metrics:
+    get:
+      tags: [operations]
+      summary: Latest sensor heartbeat
+      description: "`sensor_online` is false when the last heartbeat is older than 30 seconds or none exists."
+      responses:
+        "200": {description: Metrics, content: {application/json: {schema: {$ref: "#/components/schemas/Metrics"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/alerts:
+    get:
+      tags: [alerts]
+      summary: List alerts, newest first
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 1000000, default: 0}}
+        - {name: threat_type, in: query, schema: {type: string, enum: [PORT_SCAN, SYN_FLOOD, VOLUMETRIC, ML_ANOMALY, HIGH_TRAFFIC]}}
+        - {name: scan_type, in: query, schema: {type: string, enum: [VERTICAL, HORIZONTAL, SLOW, SLOW_VERTICAL, SLOW_HORIZONTAL]}}
+        - {name: severity, in: query, schema: {type: string, enum: [HIGH, MEDIUM, LOW, high, medium, low]}}
+        - {name: source_ip, in: query, description: IP address or CIDR, schema: {type: string, maxLength: 64}}
+        - {name: destination_ip, in: query, description: IP address or CIDR, schema: {type: string, maxLength: 64}}
+        - {name: since, in: query, description: Timezone-aware ISO-8601 timestamp, schema: {type: string, format: date-time, maxLength: 64}}
+        - {name: until, in: query, description: Timezone-aware ISO-8601 timestamp, schema: {type: string, format: date-time, maxLength: 64}}
+        - {name: q, in: query, description: Case-insensitive substring of the message (wildcards are literal), schema: {type: string, maxLength: 100}}
+        - {name: status, in: query, description: Triage status; "new" includes alerts never triaged, schema: {type: string, enum: [new, acknowledged, investigating, resolved_tp, resolved_fp]}}
+        - {name: dport, in: query, schema: {type: integer, minimum: 0, maximum: 65535}}
+        - {name: min_id, in: query, description: Only alerts with a greater id, schema: {type: integer, minimum: 0}}
+        - {name: sort, in: query, schema: {type: string, enum: [detected_at, id, severity, threat_type, source_ip, destination_ip, destination_port, confidence, status], default: detected_at}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc, ASC, DESC], default: desc}}
+      responses:
+        "200":
+          description: Alerts
+          headers:
+            X-Total-Count: {description: Number of alerts matching the filters, before paging, schema: {type: integer}}
+          content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Alert"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/graph:
+    get:
+      tags: [alerts]
+      summary: Source-to-target edges for the attack graph (default window last 24 hours)
+      description: Capped at 200 hosts and 600 edges; `truncated` says when the cap dropped data.
+      parameters:
+        - {name: since, in: query, schema: {type: string, format: date-time, maxLength: 64}}
+        - {name: until, in: query, schema: {type: string, format: date-time, maxLength: 64}}
+        - {name: threat_type, in: query, schema: {type: string, enum: [PORT_SCAN, SYN_FLOOD, VOLUMETRIC, ML_ANOMALY, HIGH_TRAFFIC]}}
+        - {name: scan_type, in: query, schema: {type: string, enum: [VERTICAL, HORIZONTAL, SLOW, SLOW_VERTICAL, SLOW_HORIZONTAL]}}
+        - {name: severity, in: query, schema: {type: string, enum: [HIGH, MEDIUM, LOW, high, medium, low]}}
+        - {name: source_ip, in: query, schema: {type: string, maxLength: 64}}
+        - {name: destination_ip, in: query, schema: {type: string, maxLength: 64}}
+        - {name: q, in: query, schema: {type: string, maxLength: 100}}
+        - {name: status, in: query, schema: {type: string, enum: [new, acknowledged, investigating, resolved_tp, resolved_fp]}}
+        - {name: dport, in: query, schema: {type: integer, minimum: 0, maximum: 65535}}
+      responses:
+        "200": {description: Graph, content: {application/json: {schema: {$ref: "#/components/schemas/Graph"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/metrics/history:
+    get:
+      tags: [operations]
+      summary: Sensor heartbeat history for sparklines
+      parameters:
+        - {name: minutes, in: query, schema: {type: integer, minimum: 1, maximum: 180, default: 30}}
+      responses:
+        "200": {description: History, content: {application/json: {schema: {$ref: "#/components/schemas/MetricsHistory"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/alerts/export:
+    get:
+      tags: [alerts]
+      summary: Download the filtered alert list (CSV or JSON)
+      description: Same filters and sort as the list, capped at 10,000 rows. CSV cells starting with = + - @ are prefixed with a quote. Every export is audited.
+      parameters:
+        - {name: format, in: query, schema: {type: string, enum: [csv, json], default: csv}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10000}}
+        - {name: sort, in: query, schema: {type: string, enum: [detected_at, id, severity, threat_type, source_ip, destination_ip, destination_port, confidence, status], default: detected_at}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc, ASC, DESC], default: desc}}
+        - {name: since, in: query, schema: {type: string, format: date-time, maxLength: 64}}
+        - {name: until, in: query, schema: {type: string, format: date-time, maxLength: 64}}
+        - {name: threat_type, in: query, schema: {type: string, enum: [PORT_SCAN, SYN_FLOOD, VOLUMETRIC, ML_ANOMALY, HIGH_TRAFFIC]}}
+        - {name: scan_type, in: query, schema: {type: string, enum: [VERTICAL, HORIZONTAL, SLOW, SLOW_VERTICAL, SLOW_HORIZONTAL]}}
+        - {name: severity, in: query, schema: {type: string, enum: [HIGH, MEDIUM, LOW, high, medium, low]}}
+        - {name: source_ip, in: query, schema: {type: string, maxLength: 64}}
+        - {name: destination_ip, in: query, schema: {type: string, maxLength: 64}}
+        - {name: q, in: query, schema: {type: string, maxLength: 100}}
+        - {name: status, in: query, schema: {type: string, enum: [new, acknowledged, investigating, resolved_tp, resolved_fp]}}
+        - {name: dport, in: query, schema: {type: integer, minimum: 0, maximum: 65535}}
+      responses:
+        "200":
+          description: File download
+          headers:
+            X-Total-Count: {description: Matching alerts, schema: {type: integer}}
+            X-Export-Truncated: {description: "true when the row cap cut the export", schema: {type: string, enum: ["true", "false"]}}
+          content:
+            text/csv: {schema: {type: string}}
+            application/json: {schema: {type: array, items: {$ref: "#/components/schemas/Alert"}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/alerts/{alert_id}/triage:
+    parameters:
+      - {name: alert_id, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 9223372036854775807}}
+    get:
+      tags: [alerts]
+      summary: Triage state and its history (from the audit log)
+      responses:
+        "200": {description: Triage, content: {application/json: {schema: {$ref: "#/components/schemas/TriageState"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+    post:
+      tags: [alerts]
+      summary: Set the triage state (analyst or admin)
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/TriageRequest"}}}
+      responses:
+        "200": {description: Updated, content: {application/json: {schema: {$ref: "#/components/schemas/Triage"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/overview:
+    get:
+      tags: [alerts]
+      summary: "Aggregates for the dashboard (default window: last 24 hours)"
+      description: Severity and triage counts, an alerts-per-bucket timeline (at most 300 buckets), top sources and top targeted ports. Accepts the same filters as the alert list except paging and sorting.
+      parameters:
+        - {name: since, in: query, schema: {type: string, format: date-time, maxLength: 64}}
+        - {name: until, in: query, schema: {type: string, format: date-time, maxLength: 64}}
+        - {name: threat_type, in: query, schema: {type: string, enum: [PORT_SCAN, SYN_FLOOD, VOLUMETRIC, ML_ANOMALY, HIGH_TRAFFIC]}}
+        - {name: scan_type, in: query, schema: {type: string, enum: [VERTICAL, HORIZONTAL, SLOW, SLOW_VERTICAL, SLOW_HORIZONTAL]}}
+        - {name: severity, in: query, schema: {type: string, enum: [HIGH, MEDIUM, LOW, high, medium, low]}}
+        - {name: source_ip, in: query, schema: {type: string, maxLength: 64}}
+        - {name: destination_ip, in: query, description: IP address or CIDR, schema: {type: string, maxLength: 64}}
+        - {name: q, in: query, schema: {type: string, maxLength: 100}}
+        - {name: status, in: query, schema: {type: string, enum: [new, acknowledged, investigating, resolved_tp, resolved_fp]}}
+        - {name: dport, in: query, schema: {type: integer, minimum: 0, maximum: 65535}}
+      responses:
+        "200": {description: Aggregates, content: {application/json: {schema: {$ref: "#/components/schemas/Overview"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/assignees:
+    get:
+      tags: [alerts]
+      summary: Usernames an alert can be assigned to (analyst or admin)
+      responses:
+        "200": {description: Enabled usernames, content: {application/json: {schema: {type: array, items: {type: string}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+  /api/v1/stats:
+    get:
+      tags: [alerts]
+      summary: Aggregated alert counts
+      responses:
+        "200": {description: Counts, content: {application/json: {schema: {$ref: "#/components/schemas/Stats"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/stream:
+    get:
+      tags: [operations]
+      summary: Live updates (Server-Sent Events)
+      description: |
+        Emits `event: update` every 2 s with `{new_alert_ids, latest_alert_id, metrics}` and a `: heartbeat` comment
+        when idle for 15 s. At most 8 streams may be open at once; further requests get 429 and should fall back to polling.
+      parameters:
+        - {name: after_id, in: query, description: Replay alerts with a greater id, schema: {type: string, pattern: "^[0-9]{1,12}$"}}
+      responses:
+        "200": {description: Event stream, content: {text/event-stream: {schema: {type: string}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/Unavailable"}
+  /api/v1/users:
+    get:
+      tags: [admin]
+      summary: List users (admin)
+      responses:
+        "200": {description: Users, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/User"}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    post:
+      tags: [admin]
+      summary: Create a user (admin; there is no public sign-up)
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/UserCreate"}}}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/UserCreated"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+  /api/v1/users/{user_id}/disable:
+    post:
+      tags: [admin]
+      summary: Disable a user and end their sessions (admin)
+      parameters: [{$ref: "#/components/parameters/UserId"}]
+      responses: {"204": {description: Disabled}, "400": {$ref: "#/components/responses/BadRequest"}, "401": {$ref: "#/components/responses/Unauthorized"}, "403": {$ref: "#/components/responses/Forbidden"}, "404": {$ref: "#/components/responses/NotFound"}, "429": {$ref: "#/components/responses/RateLimited"}}
+  /api/v1/users/{user_id}/enable:
+    post:
+      tags: [admin]
+      summary: Re-enable a user (admin)
+      parameters: [{$ref: "#/components/parameters/UserId"}]
+      responses: {"204": {description: Enabled}, "400": {$ref: "#/components/responses/BadRequest"}, "401": {$ref: "#/components/responses/Unauthorized"}, "403": {$ref: "#/components/responses/Forbidden"}, "404": {$ref: "#/components/responses/NotFound"}, "429": {$ref: "#/components/responses/RateLimited"}}
+  /api/v1/users/{user_id}/reset-password:
+    post:
+      tags: [admin]
+      summary: Set a new password and end the user's sessions (admin)
+      parameters: [{$ref: "#/components/parameters/UserId"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/PasswordReset"}}}
+      responses: {"204": {description: Password changed}, "400": {$ref: "#/components/responses/BadRequest"}, "401": {$ref: "#/components/responses/Unauthorized"}, "403": {$ref: "#/components/responses/Forbidden"}, "404": {$ref: "#/components/responses/NotFound"}, "413": {$ref: "#/components/responses/TooLarge"}, "429": {$ref: "#/components/responses/RateLimited"}}
+  /api/v1/users/{user_id}/revoke-sessions:
+    post:
+      tags: [admin]
+      summary: End all sessions of a user (admin)
+      parameters: [{$ref: "#/components/parameters/UserId"}]
+      responses:
+        "200": {description: Revoked, content: {application/json: {schema: {type: object, required: [revoked], properties: {revoked: {type: integer}}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+  /api/v1/apikeys:
+    get:
+      tags: [admin]
+      summary: List API keys (prefix only; admin)
+      responses:
+        "200": {description: Keys, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/ApiKey"}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    post:
+      tags: [admin]
+      summary: Create an API key; the key is returned once (admin)
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/ApiKeyCreate"}}}
+      responses:
+        "201": {description: Created, content: {application/json: {schema: {$ref: "#/components/schemas/ApiKeyCreated"}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "413": {$ref: "#/components/responses/TooLarge"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+  /api/v1/apikeys/{key_id}:
+    delete:
+      tags: [admin]
+      summary: Revoke an API key; effective on its next request (admin)
+      parameters: [{name: key_id, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 9223372036854775807}}]
+      responses: {"204": {description: Revoked}, "400": {$ref: "#/components/responses/BadRequest"}, "401": {$ref: "#/components/responses/Unauthorized"}, "403": {$ref: "#/components/responses/Forbidden"}, "404": {$ref: "#/components/responses/NotFound"}, "429": {$ref: "#/components/responses/RateLimited"}}
+  /api/v1/audit:
+    get:
+      tags: [admin]
+      summary: Read the append-only audit log (admin)
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 500, default: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, default: 0}}
+        - {name: action, in: query, schema: {type: string, maxLength: 64}}
+        - {name: actor, in: query, schema: {type: string, maxLength: 128}}
+        - {name: target, in: query, schema: {type: string, maxLength: 128}}
+        - {name: since, in: query, schema: {type: string, format: date-time, maxLength: 64}}
+      responses:
+        "200": {description: Entries, content: {application/json: {schema: {type: array, items: {$ref: "#/components/schemas/AuditEntry"}}}}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, description: "API key, `sx_` prefix"}
+    cookieAuth: {type: apiKey, in: cookie, name: sx_session}
+    csrfHeader: {type: apiKey, in: header, name: X-CSRF-Token, description: "Required with cookieAuth on POST/PUT/PATCH/DELETE"}
+  parameters:
+    UserId: {name: user_id, in: path, required: true, schema: {type: integer, minimum: 1, maximum: 9223372036854775807}}
+  headers:
+    RetryAfter: {schema: {type: integer}, description: Seconds to wait}
+  responses:
+    BadRequest: {description: Invalid request, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Unauthorized: {description: Missing, invalid, expired or revoked credentials, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Forbidden: {description: Role lacks the permission, or CSRF/Origin check failed, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    NotFound: {description: No such resource, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    TooLarge: {description: Request body over 64 KiB, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    RateLimited: {description: Rate limit or lockout, headers: {Retry-After: {$ref: "#/components/headers/RetryAfter"}}, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+    Unavailable: {description: The sensor database is not available yet, content: {application/json: {schema: {$ref: "#/components/schemas/Error"}}}}
+  schemas:
+    Error:
+      type: object
+      required: [error, message, status]
+      properties: {error: {type: string}, message: {type: string}, status: {type: integer}}
+    Health:
+      type: object
+      required: [status, database, timestamp]
+      properties: {status: {type: string}, service: {type: string}, database: {type: string}, timestamp: {type: string}}
+    LoginRequest:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties: {username: {type: string, minLength: 1, maxLength: 64}, password: {type: string, minLength: 1, maxLength: 1024}}
+    LoginResponse:
+      type: object
+      required: [user, csrf_token]
+      properties:
+        user: {type: object, required: [username, role], properties: {username: {type: string}, role: {type: string, enum: [viewer, analyst, admin]}}}
+        csrf_token: {type: string}
+    Session:
+      type: object
+      required: [kind, name, role]
+      properties: {kind: {type: string, enum: [user, apikey]}, name: {type: string}, role: {type: string, enum: [viewer, analyst, admin]}, csrf_token: {type: [string, "null"]}}
+    Alert:
+      type: object
+      required: [id, detected_at, threat_type, severity]
+      properties:
+        id: {type: integer}
+        timestamp: {type: [string, "null"]}
+        detected_at: {type: [string, "null"]}
+        threat_type: {type: string}
+        scan_type: {type: [string, "null"]}
+        severity: {type: string}
+        confidence: {type: [number, "null"]}
+        source_ip: {type: [string, "null"]}
+        destination_ip: {type: [string, "null"]}
+        destination_port: {type: [integer, "null"]}
+        protocol: {type: [string, "null"]}
+        message: {type: [string, "null"]}
+        evidence: {}
+        ml_score: {type: [number, "null"]}
+        ml_label: {type: [string, "null"]}
+        sensor_id: {type: [string, "null"]}
+        triage_status: {type: string, enum: [new, acknowledged, investigating, resolved_tp, resolved_fp]}
+        assignee: {type: [string, "null"]}
+    Overview:
+      type: object
+      required: [since, until, bucket_minutes, total, severity, triage, open, resolved, timeline, top_sources, top_ports]
+      properties:
+        since: {type: string}
+        until: {type: string}
+        bucket_minutes: {type: integer, minimum: 1}
+        total: {type: integer}
+        severity: {type: object, additionalProperties: {type: integer}}
+        triage: {type: object, additionalProperties: {type: integer}}
+        open: {type: integer}
+        resolved: {type: integer}
+        timeline: {type: array, items: {type: object, required: [t, count], properties: {t: {type: string}, count: {type: integer}}}}
+        top_sources: {type: array, items: {type: object, required: [value, count], properties: {value: {type: string}, count: {type: integer}}}}
+        top_ports: {type: array, items: {type: object, required: [value, count], properties: {value: {type: integer}, count: {type: integer}}}}
+    Graph:
+      type: object
+      required: [since, truncated, total_nodes, nodes, edges]
+      properties:
+        since: {type: string}
+        truncated: {type: boolean}
+        total_nodes: {type: integer}
+        nodes: {type: array, items: {type: object, required: [id, count, role], properties: {id: {type: string}, count: {type: integer}, role: {type: string, enum: [source, target, both]}}}}
+        edges: {type: array, items: {type: object, required: [source, target, threat_type, count], properties: {source: {type: string}, target: {type: string}, threat_type: {type: string}, count: {type: integer}}}}
+    MetricsHistory:
+      type: object
+      required: [window_minutes, points, drop_rate, drop_warn_ratio]
+      properties:
+        window_minutes: {type: integer}
+        drop_rate: {type: [number, "null"]}
+        drop_warn_ratio: {type: number}
+        points: {type: array, items: {type: object, properties: {last_seen: {type: string}, pps_10s: {type: number}, received: {type: integer}, dropped: {type: integer}, queue_depth: {type: integer}, state_size: {type: integer}, evictions: {type: integer}}}}
+    Stats:
+      type: object
+      required: [total_alerts, high_severity, port_scans, syn_floods, volumetric, high_traffic]
+      properties:
+        total_alerts: {type: integer}
+        high_severity: {type: integer}
+        port_scans: {type: integer}
+        syn_floods: {type: integer}
+        volumetric: {type: integer}
+        high_traffic: {type: integer}
+    Metrics:
+      type: object
+      required: [sensor_online, last_seen, age_seconds, api]
+      properties:
+        sensor_online: {type: boolean}
+        last_seen: {type: [string, "null"]}
+        age_seconds: {type: [number, "null"]}
+        sensor_id: {type: [string, "null"]}
+        received: {type: integer}
+        dropped: {type: integer}
+        queue_depth: {type: integer}
+        pps_10s: {type: number}
+        state_size: {type: integer}
+        evictions: {type: integer}
+        webhook_failures: {type: integer}
+        api: {type: object, additionalProperties: {type: integer}}
+    TriageRequest:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status: {type: string, enum: [new, acknowledged, investigating, resolved_tp, resolved_fp]}
+        assignee: {type: [string, "null"], pattern: "^[A-Za-z0-9._-]{3,64}$"}
+        note: {type: [string, "null"], maxLength: 2000, description: Plain text}
+    Triage:
+      type: object
+      required: [alert_id, status]
+      properties:
+        alert_id: {type: integer}
+        status: {type: string}
+        assignee: {type: [string, "null"]}
+        note: {type: [string, "null"]}
+        updated_by: {type: string}
+        updated_at: {type: number}
+    TriageState:
+      type: object
+      required: [alert_id, triage, history]
+      properties:
+        alert_id: {type: integer}
+        triage: {oneOf: [{$ref: "#/components/schemas/Triage"}, {type: "null"}]}
+        history: {type: array, items: {$ref: "#/components/schemas/AuditEntry"}}
+    User:
+      type: object
+      required: [id, username, role, disabled]
+      properties: {id: {type: integer}, username: {type: string}, role: {type: string}, disabled: {type: integer}, created_at: {type: number}, last_login_at: {type: [number, "null"]}}
+    UserCreate:
+      type: object
+      required: [username, password, role]
+      additionalProperties: false
+      properties:
+        username: {type: string, pattern: "^[A-Za-z0-9._-]{3,64}$"}
+        password: {type: string, minLength: 12, maxLength: 1024}
+        role: {type: string, enum: [viewer, analyst, admin]}
+    UserCreated:
+      type: object
+      required: [id, username, role]
+      properties: {id: {type: integer}, username: {type: string}, role: {type: string}}
+    PasswordReset:
+      type: object
+      required: [password]
+      additionalProperties: false
+      properties: {password: {type: string, minLength: 12, maxLength: 1024}}
+    ApiKey:
+      type: object
+      required: [id, name, prefix, role]
+      properties: {id: {type: integer}, name: {type: string}, prefix: {type: string}, role: {type: string}, created_by: {type: string}, created_at: {type: number}, last_used_at: {type: [number, "null"]}, revoked_at: {type: [number, "null"]}}
+    ApiKeyCreate:
+      type: object
+      required: [name, role]
+      additionalProperties: false
+      properties: {name: {type: string, minLength: 1, maxLength: 64}, role: {type: string, enum: [viewer, analyst]}}
+    ApiKeyCreated:
+      type: object
+      required: [id, key]
+      properties: {id: {type: integer}, key: {type: string}, note: {type: string}}
+    AuditEntry:
+      type: object
+      required: [id, ts, actor, action]
+      properties: {id: {type: integer}, ts: {type: string}, actor: {type: string}, source_ip: {type: [string, "null"]}, action: {type: string}, target: {type: [string, "null"]}, detail: {}}
