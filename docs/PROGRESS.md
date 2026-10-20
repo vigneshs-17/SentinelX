@@ -37,7 +37,7 @@ Run these yourself. Nothing below was run by the author unless stated.
    docker compose up -d --build
    python scripts/ci_compose_check.py
    ```
-4. **GitHub Actions, never run:** push the branch and read the jobs `api-fuzz` (Schemathesis + ZAP), `container-scan` (Trivy), `secret-scan` (gitleaks; may need a `GITLEAKS_LICENSE` secret for organisation repositories), `compose-integration` and `e2e`. Action versions were taken from their README pages, not from a run.
+4. **GitHub Actions: ran green on commit `cf2a691` (run 39465667959, all 12 jobs).** Re-check after any change by reading the jobs `api-fuzz` (Schemathesis + ZAP), `container-scan` (Trivy), `secret-scan` (gitleaks; may need a `GITLEAKS_LICENSE` secret for organisation repositories), `compose-integration` and `e2e`. Action versions were taken from their README pages, not from a run.
 5. **Phase 5 data pipeline (needs the CIC-IDS2017 PCAPs in `D:\datasets\cicids2017\`, see `docs/DATASET.md`):**
    ```bash
    python scripts/build_flows.py D:\datasets\cicids2017\*.pcap --out flows.csv.gz

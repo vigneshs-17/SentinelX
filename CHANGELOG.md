@@ -64,7 +64,7 @@ the rest come from commit titles and test docstrings.
 ### Known gaps at this version
 
 - The Phase 5 real-data run (CIC-IDS2017) has not been done, so ML accuracy is unmeasured and ML stays off.
-- The new CI jobs (fuzz, ZAP, container scan, secret scan, compose, browser) have not run on GitHub.
+- All CI jobs (regression on Python 3.12 and 3.14, benchmark, fuzz, ZAP, container scans, secret scan, compose, browser) passed on GitHub Actions for commit `cf2a691`. They have not been run against a live capture or a real NIC.
 - No screen-reader testing; automated accessibility checks only.
 - Live capture inside the Docker container is not tested in CI (CI covers replay, the API and the console).
 - The signed ML gate protects against file tampering only; it does not prove the key holder evaluated honestly.

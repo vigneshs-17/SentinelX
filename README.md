@@ -22,7 +22,7 @@ docker compose run --rm api python main.py user add admin --role admin
 docker compose up -d
 ```
 
-Open <http://127.0.0.1:5000/> and sign in as `admin`. Set `SENTINELX_INTERFACE` to pick a NIC. Docker was not run locally while writing this; the image and compose file are exercised only by the CI jobs (`scripts/ci_compose_check.py`), which have not run on GitHub yet.
+Open <http://127.0.0.1:5000/> and sign in as `admin`. Set `SENTINELX_INTERFACE` to pick a NIC. Docker was not run locally while writing this; the image and compose file are exercised only by the CI jobs (`scripts/ci_compose_check.py`), which passed on GitHub Actions for commit `cf2a691` (run 39465667959).
 
 ### Windows, Npcap
 
