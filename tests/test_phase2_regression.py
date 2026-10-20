@@ -40,12 +40,13 @@ from database.database import (
 from database.migrations import apply_migrations
 from detection.scoring import calculate_confidence, calculate_severity
 from detection.utils import is_multicast_or_broadcast
+from tests.support import authed_client
 
 
 @pytest.fixture
 def client():
     app.config["TESTING"] = True
-    return app.test_client()
+    return authed_client(app)
 
 
 # =============================================================================
@@ -70,8 +71,8 @@ def test_empty_data_dir_startup_lifecycle_and_api(monkeypatch, client):
         # Initialize database at startup (as main.py and backend/api.py do)
         initialize_database()
 
-        expected_db = data_dir / "sentinelx.db"
-        assert expected_db.exists(), "sentinelx.db should be created under data dir on startup"
+        expected_db = data_dir / "alerts.db"
+        assert expected_db.exists(), "alerts.db should be created under data dir on startup"
 
         # Generate a small PCAP containing a vertical port scan
         pcap_file = temp_path / "vertical_scan.pcap"
@@ -102,7 +103,7 @@ def test_empty_data_dir_startup_lifecycle_and_api(monkeypatch, client):
         assert row[4] == "192.168.1.10"
 
         # Verify alert is returned by GET /api/alerts
-        response = client.get("/api/alerts")
+        response = client.get("/api/v1/alerts")
         assert response.status_code == 200
         alerts = response.get_json()
         assert isinstance(alerts, list)
@@ -518,7 +519,7 @@ def test_api_since_filter_and_ordering(client):
     )
 
     # 1. Query with 'Z' suffix (10:00 UTC) -> should return 10:00 and 12:00
-    res_z = client.get("/api/alerts?since=2026-10-19T10:00:00Z")
+    res_z = client.get("/api/v1/alerts?since=2026-10-19T10:00:00Z")
     assert res_z.status_code == 200
     alerts_z = res_z.get_json()
     assert len(alerts_z) == 2
@@ -526,19 +527,19 @@ def test_api_since_filter_and_ordering(client):
     assert alerts_z[1]["source_ip"] == "10.1.1.2"
 
     # 2. Query with offset (+05:30): 15:30+05:30 == 10:00Z -> should return same 2 alerts
-    res_offset = client.get("/api/alerts?since=2026-10-19T15:30:00+05:30")
+    res_offset = client.get("/api/v1/alerts?since=2026-10-19T15:30:00+05:30")
     assert res_offset.status_code == 200
     alerts_offset = res_offset.get_json()
     assert len(alerts_offset) == 2
     assert alerts_offset[0]["source_ip"] == "10.1.1.3"
 
     # 3. Reject naive timestamp with 400
-    res_naive = client.get("/api/alerts?since=2026-10-19T10:00:00")
+    res_naive = client.get("/api/v1/alerts?since=2026-10-19T10:00:00")
     assert res_naive.status_code == 400
     assert "timezone-aware" in res_naive.get_json()["message"]
 
     # 4. Reject malformed string with 400
-    res_invalid = client.get("/api/alerts?since=not-a-valid-timestamp")
+    res_invalid = client.get("/api/v1/alerts?since=not-a-valid-timestamp")
     assert res_invalid.status_code == 400
     assert "valid ISO-8601" in res_invalid.get_json()["message"]
 
@@ -575,7 +576,7 @@ def test_api_stats_group_by_threat_type(client):
         }
     )
 
-    res = client.get("/api/stats")
+    res = client.get("/api/v1/stats")
     assert res.status_code == 200
     data = res.get_json()
 

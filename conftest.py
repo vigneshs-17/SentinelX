@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from database.app_db import initialize_app_database
 from database.database import close_database, initialize_database
 
 
@@ -21,6 +22,16 @@ def isolate_test_storage(monkeypatch):
 
         monkeypatch.setenv("SENTINELX_DB_PATH", str(test_db))
         monkeypatch.setenv("SENTINELX_ALERT_LOG", str(test_alerts))
+        monkeypatch.setenv("SENTINELX_APP_DB_PATH", str(temp_path / "test_app.db"))
+        initialize_app_database()
+        import backend.auth as auth_module
+        from backend.ratelimit import limiter
+
+        auth_module.throttle.reset()
+        limiter.reset()
+        # Rate limits are exercised explicitly in test_phase6c_api.py; elsewhere they must not interfere.
+        monkeypatch.setattr(auth_module, "API_RATE_LIMIT_PER_MIN", 1_000_000)
+        monkeypatch.setattr(auth_module, "LOGIN_RATE_LIMIT_PER_MIN", 1_000_000)
 
         # Initialize isolated test database schema
         initialize_database()

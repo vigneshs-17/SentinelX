@@ -1,143 +1,147 @@
+"""Console hardening: strict CSP header, no inline code, no external resources, XSS-safe DOM use, size budget."""
+
 import re
+from pathlib import Path
 
 import pytest
 
-from backend.api import DASHBOARD_DIR, app
+from backend.api import CSP, DASHBOARD_DIR, STATIC_DIR, app
+from tests.support import authed_client
+
+ENDPOINTS = ["/", "/health", "/static/js/main.js", "/static/css/app.css", "/api/v1/alerts", "/api/v1/stats"]
+FORBIDDEN_JS = ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function")
+BUDGET_BYTES = 200 * 1024
+
+
+def js_files():
+    return sorted(STATIC_DIR.rglob("*.js"))
 
 
 @pytest.fixture
 def client():
     app.config["TESTING"] = True
-    with app.test_client() as c:
-        yield c
+    return authed_client(app)
 
 
-class TestPhase7BCSPAndPermissionsPolicy:
-    """Tests for Phase 7B Step 1: Content-Security-Policy & Permissions-Policy Hardening."""
+def test_csp_header_is_exact_and_present_everywhere(client):
+    for ep in ENDPOINTS:
+        assert client.get(ep).headers.get("Content-Security-Policy") == CSP, ep
+    assert CSP.split("; ") == [
+        "default-src 'none'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "connect-src 'self'",
+        "img-src 'self' data:",
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+    ]
+    assert "unsafe-inline" not in CSP and "127.0.0.1" not in CSP
 
-    def test_csp_header_on_all_endpoints(self, client):
-        """Verify Content-Security-Policy header exists on /, /health, /api/health, /api/alerts, /api/stats."""
-        endpoints = ["/", "/health", "/api/health", "/api/alerts", "/api/stats"]
-        for ep in endpoints:
-            resp = client.get(ep)
-            assert resp.status_code in (200, 204), f"Unexpected status on {ep}: {resp.status_code}"
-            csp = resp.headers.get("Content-Security-Policy")
-            assert csp is not None, f"Missing Content-Security-Policy on {ep}"
 
-    def test_csp_header_contains_required_directives(self, client):
-        """Verify CSP header strictly matches the approved policy baseline."""
-        resp = client.get("/")
-        csp = resp.headers.get("Content-Security-Policy", "")
+def test_permissions_policy_header_directives(client):
+    for ep in ENDPOINTS:
+        perm = client.get(ep).headers.get("Permissions-Policy", "")
+        for token in ("camera=()", "microphone=()", "geolocation=()", "payment=()", "usb=()"):
+            assert token in perm, (ep, token)
 
-        required_directives = [
-            "default-src 'none'",
-            "script-src 'self' 'unsafe-inline'",
-            "style-src 'self' 'unsafe-inline'",
-            "connect-src 'self' http://127.0.0.1:5000",
-            "img-src 'self' data:",
-            "frame-ancestors 'none'",
-            "base-uri 'none'",
-            "form-action 'none'",
-        ]
-        for directive in required_directives:
-            assert directive in csp, f"Directive '{directive}' missing from CSP: {csp}"
 
-    def test_permissions_policy_header_directives(self, client):
-        """Verify Permissions-Policy header blocks dangerous APIs and allows clipboard-write=(self)."""
-        endpoints = ["/", "/health", "/api/health", "/api/alerts", "/api/stats"]
-        expected_tokens = [
-            "camera=()",
-            "microphone=()",
-            "geolocation=()",
-            "payment=()",
-            "usb=()",
-            "bluetooth=()",
-            "display-capture=()",
-            "clipboard-write=(self)",
-        ]
-        for ep in endpoints:
-            resp = client.get(ep)
-            perm = resp.headers.get("Permissions-Policy")
-            assert perm is not None, f"Missing Permissions-Policy on {ep}"
-            for token in expected_tokens:
-                assert token in perm, f"Token '{token}' missing from Permissions-Policy on {ep}"
+def test_index_has_no_inline_script_style_or_handlers():
+    html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
+    assert not re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html, re.I), "inline <script>"
+    assert "<style" not in html.lower(), "inline <style>"
+    assert not re.findall(r"\sstyle\s*=", html, re.I), "inline style attribute"
+    assert not re.findall(r"\son[a-z]+\s*=", html, re.I), "inline event handler"
+    assert 'http-equiv="Content-Security-Policy"' not in html  # the response header is the single source of truth
+    assert '<script type="module" src="/static/js/main.js">' in html and 'href="/static/css/app.css"' in html
 
-    def test_dashboard_meta_tag_csp_matches_baseline(self):
-        """Verify dashboard/index.html includes matching CSP meta tag for file:// launch compatibility."""
-        index_file = DASHBOARD_DIR / "index.html"
-        assert index_file.exists()
-        content = index_file.read_text(encoding="utf-8")
 
-        # Must have a <meta http-equiv="Content-Security-Policy" ...> tag
-        meta_match = re.search(
-            r'<meta\s+http-equiv=["\']Content-Security-Policy["\']\s+content="([^"]+)"', content, re.IGNORECASE
-        )
-        assert meta_match is not None, "Missing <meta http-equiv='Content-Security-Policy'> in dashboard/index.html"
-        meta_csp = meta_match.group(1)
+def test_no_markup_parsing_or_code_evaluating_apis_anywhere_in_static():
+    """Phase 7 rule: textContent/createElement only; fails on any HTML-string sink or dynamic code."""
+    assert js_files()
+    for path in js_files():
+        text = path.read_text(encoding="utf-8")
+        for bad in FORBIDDEN_JS:
+            assert bad not in text, f"{bad} in {path.name}"
+        assert not re.search(r"setAttribute\(\s*['\"]style['\"]", text), f"inline style via setAttribute in {path.name}"
+        assert ".cssText" not in text, path.name
+        assert not re.search(r"[{,]\s*style\s*:", text), f"style prop passed to h() in {path.name}"
+        assert not re.search(r"tabindex['\"]?\s*:\s*['\"]?[1-9]", text), f"positive tabindex in {path.name}"
 
-        required_meta_directives = [
-            "default-src 'none'",
-            "script-src 'self' 'unsafe-inline'",
-            "style-src 'self' 'unsafe-inline'",
-            "connect-src 'self' http://127.0.0.1:5000",
-            "img-src 'self' data:",
-            "base-uri 'none'",
-            "form-action 'none'",
-        ]
-        for directive in required_meta_directives:
-            assert directive in meta_csp, f"Meta CSP missing '{directive}': {meta_csp}"
 
-    def test_dashboard_zero_external_dependencies(self):
-        """Verify dashboard has zero external CDN links, fonts, or scripts."""
-        index_file = DASHBOARD_DIR / "index.html"
-        content = index_file.read_text(encoding="utf-8")
+def test_no_external_resources_in_html_css_or_js():
+    html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
+    css = (STATIC_DIR / "css" / "app.css").read_text(encoding="utf-8")
+    assert not re.findall(r'(?:src|href)=[\'"]https?://', html, re.I)
+    assert "@import" not in css and not re.findall(r"url\(\s*['\"]?https?://", css, re.I)
+    for path in js_files():
+        text = path.read_text(encoding="utf-8")
+        assert not re.search(r"(?:fetch|import)\(\s*['\"`]https?://", text), path.name
+        assert "XMLHttpRequest" not in text and "WebSocket(" not in text, path.name
 
-        # No http:// or https:// external links in src/href
-        external_refs = re.findall(
-            r'<(?:link|script|img|iframe)\b[^>]*\b(?:src|href)=[\'"](https?://[^\'"]*)[\'"]', content, re.IGNORECASE
-        )
-        assert len(external_refs) == 0, f"Found unexpected external resources: {external_refs}"
 
-    def test_dashboard_security_invariants(self):
-        """Verify strict XSS protections: no innerHTML, no outerHTML, no eval."""
-        index_file = DASHBOARD_DIR / "index.html"
-        content = index_file.read_text(encoding="utf-8")
+def test_js_and_css_stay_under_the_200kb_budget():
+    total = sum(p.stat().st_size for p in [*js_files(), *STATIC_DIR.rglob("*.css")])
+    assert total < BUDGET_BYTES, f"{total} bytes of JS+CSS exceeds the {BUDGET_BYTES} byte budget"
 
-        assert "innerHTML" not in content, "Found forbidden innerHTML in dashboard/index.html"
-        assert "outerHTML" not in content, "Found forbidden outerHTML in dashboard/index.html"
-        assert "document.write" not in content, "Found forbidden document.write in dashboard/index.html"
-        assert "eval(" not in content, "Found forbidden eval() in dashboard/index.html"
 
-    def test_clipboard_helper_integrity(self):
-        """Verify copyToClipboard uses text-only APIs and fallback uses textContent/plain value."""
-        index_file = DASHBOARD_DIR / "index.html"
-        content = index_file.read_text(encoding="utf-8")
+def test_every_relative_import_resolves_to_a_file():
+    for path in js_files():
+        for spec in re.findall(r"""from\s+["'](\.{1,2}/[^"']+)["']""", path.read_text(encoding="utf-8")):
+            assert (path.parent / spec).resolve().is_file(), f"{path.name} imports missing {spec}"
 
-        assert "navigator.clipboard.writeText" in content, "Missing navigator.clipboard.writeText in dashboard"
-        assert "fallbackCopy" in content, "Missing fallbackCopy helper in dashboard"
-        assert 'document.execCommand("copy")' in content or "document.execCommand('copy')" in content
 
-    def test_cors_behavior_preserved_with_csp(self, client, monkeypatch):
-        """Verify CORS rules operate normally alongside the new CSP and Permissions-Policy headers."""
-        # 1. Allowed origin
-        resp_allowed = client.get("/api/stats", headers={"Origin": "http://127.0.0.1:5000"})
-        assert resp_allowed.headers.get("Access-Control-Allow-Origin") == "http://127.0.0.1:5000"
-        assert "Content-Security-Policy" in resp_allowed.headers
-        assert "Permissions-Policy" in resp_allowed.headers
+def test_every_api_path_the_console_calls_exists_on_the_server():
+    """Contract test: the strings the JS passes to fetch/api.get/api.post must be routes Flask knows."""
+    adapter = app.url_map.bind("localhost")
+    seen = set()
+    for path in js_files():
+        for literal in re.findall(
+            r"""["'`](/(?:api/v1/[A-Za-z0-9_/\-${}.]*|login))["'`]""", path.read_text(encoding="utf-8")
+        ):
+            seen.add(re.sub(r"\$\{[^}]*\}", "1", literal))
+    assert {"/login", "/api/v1/alerts", "/api/v1/overview", "/api/v1/session", "/api/v1/logout"} <= seen
+    for literal in seen:
+        for method in ("GET", "POST", "DELETE"):
+            try:
+                adapter.match(literal, method=method)
+                break
+            except Exception:  # noqa: S112 - try the next method; fail below if none matches
+                continue
+        else:
+            pytest.fail(f"console calls {literal} but no route matches")
 
-        # 2. Localhost alias
-        resp_local = client.get("/api/stats", headers={"Origin": "http://localhost:5000"})
-        assert resp_local.headers.get("Access-Control-Allow-Origin") == "http://localhost:5000"
 
-        # 3. Origin: null blocked by default
-        resp_null = client.get("/api/stats", headers={"Origin": "null"})
-        assert "Access-Control-Allow-Origin" not in resp_null.headers
+def test_static_serving_is_confined_to_the_static_directory(client):
+    assert client.get("/static/js/main.js").status_code == 200
+    assert client.get("/static/js/main.js").mimetype in ("text/javascript", "application/javascript")
+    assert client.get("/static/css/app.css").status_code == 200
+    for evil in ("../index.html", "..%2findex.html", "%2e%2e/index.html", "js/../../index.html", "nope.js"):
+        assert client.get(f"/static/{evil}").status_code == 404
 
-        # 4. Origin: null allowed with opt-in
-        monkeypatch.setattr("backend.api.ALLOW_LOCAL_FILE_CORS", True)
-        resp_null_optin = client.get("/api/stats", headers={"Origin": "null"})
-        assert resp_null_optin.headers.get("Access-Control-Allow-Origin") == "null"
 
-        # 5. Untrusted origin blocked
-        resp_evil = client.get("/api/stats", headers={"Origin": "https://evil.example.com"})
-        assert "Access-Control-Allow-Origin" not in resp_evil.headers
+def test_shell_has_the_accessibility_basics():
+    html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
+    assert '<html lang="en">' in html and "<title>" in html and 'name="viewport"' in html
+    assert 'class="skip-link" href="#main"' in html and '<main id="main"' in html
+    assert "<header" in html and '<nav class="nav"' in html and 'aria-label="Primary"' in html
+    assert 'aria-live="polite"' in html and 'role="status"' in html  # live regions for alerts and toasts
+
+
+def test_reduced_motion_and_both_themes_are_defined():
+    css = (STATIC_DIR / "css" / "app.css").read_text(encoding="utf-8")
+    assert (
+        "prefers-reduced-motion: reduce" in css and 'data-theme="light"' in css and "prefers-color-scheme: light" in css
+    )
+    assert "font-variant-numeric: tabular-nums" in css
+    for sev in ("HIGH", "MEDIUM", "LOW"):
+        assert f".sev-{sev}" in css
+    for value in re.findall(r"transition:[^;]*?(\d*\.?\d+)s", css):  # transitions stay at or under 150 ms
+        assert float(value) <= 0.15, f"transition {value}s is over 150 ms"
+
+
+def test_keyboard_shortcuts_documented_in_the_help_overlay():
+    main = (STATIC_DIR / "js" / "main.js").read_text(encoding="utf-8")
+    for key in ('"j / k"', '"Enter"', '"a"', '"/"', '"?"', '"Esc"'):
+        assert key in main
+    assert Path(STATIC_DIR / "js" / "views" / "alerts.js").read_text(encoding="utf-8").count("shortcuts.set") == 1

@@ -29,6 +29,8 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = ["e2e: browser tests against a real API process; run with pytest -m e2e tests/e2e"]
+addopts = "-m 'not e2e'"
 
 [tool.mypy]
 python_version = "3.12"
@@ -52,6 +54,7 @@ module = [
     "sklearn.*",
     "pandas.*",
     "skops.*",
+    "waitress.*",
 ]
 ignore_missing_imports = true
 follow_imports = "skip"

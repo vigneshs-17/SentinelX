@@ -13,6 +13,7 @@ from database.database import (
     insert_alert,
 )
 from logs.alert_logger import log_alert
+from tests.support import authed_client
 
 PROD_DB_FILE = Path(__file__).resolve().parent.parent / "database" / "sentinelx.db"
 PROD_ALERT_FILE = Path(__file__).resolve().parent.parent / "logs" / "alerts.json"
@@ -113,8 +114,8 @@ class TestPhase1Regression:
             }
         )
 
-        client = app.test_client()
-        response = client.get("/api/stats")
+        client = authed_client(app)
+        response = client.get("/api/v1/stats")
         assert response.status_code == 200
         stats = response.get_json()
 
@@ -130,16 +131,12 @@ class TestPhase1Regression:
         assert "ML_HIGH_TRAFFIC" not in CANONICAL_THREAT_TYPES
 
     def test_dashboard_xss_protection_source_code(self):
-        """Verify dashboard/index.html uses textContent and createElement instead of unsafe innerHTML for alert rendering."""
-        dashboard_html_path = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
-        assert dashboard_html_path.exists()
-
-        content = dashboard_html_path.read_text(encoding="utf-8")
-
-        # Must not have innerHTML inside alerts.forEach
-        assert "row.innerHTML =" not in content, "Found unsafe row.innerHTML in dashboard/index.html!"
-        # Must have textContent assignments
-        assert "cell.textContent =" in content, "Expected cell.textContent assignment for safe DOM rendering"
+        """The console builds every node with createElement/textContent; no markup-parsing sink exists in any asset."""
+        static = Path(__file__).resolve().parent.parent / "dashboard" / "static"
+        sources = "\n".join(p.read_text(encoding="utf-8") for p in sorted(static.rglob("*.js")))
+        assert sources
+        assert "innerHTML" not in sources and "outerHTML" not in sources
+        assert "textContent" in sources and "createElement" in sources
 
     def test_stored_xss_payload_safety_in_api(self):
         """Verify XSS vectors stored in database are cleanly returned as JSON and not executable markup."""
@@ -155,8 +152,8 @@ class TestPhase1Regression:
         }
         insert_alert(alert_record)
 
-        client = app.test_client()
-        response = client.get("/api/alerts")
+        client = authed_client(app)
+        response = client.get("/api/v1/alerts")
         assert response.status_code == 200
         alerts = response.get_json()
 

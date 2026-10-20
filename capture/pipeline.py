@@ -47,7 +47,7 @@ class PacketPipeline:
         self.processor: Callable[[Any], Any]
         self.set_processor(processor)
 
-    def set_processor(self, processor: Callable | None) -> None:
+    def set_processor(self, processor: Any) -> None:
         """Set or update the packet processor function or PacketProcessor instance."""
         if processor is None:
             from capture.processor import PacketProcessor

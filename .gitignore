@@ -57,3 +57,6 @@ logs/alerts.jsonl*
 # Local scratch artifacts
 Screenshot 2026-09-07 092417.png
 terminal 1 command.txt
+
+# Schemathesis run cache
+.schemathesis/

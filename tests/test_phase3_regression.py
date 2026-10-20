@@ -458,9 +458,9 @@ def test_migration_3_rename_high_traffic_to_volumetric(tmp_path):
     conn.execute("PRAGMA user_version = 1;")
     conn.commit()
 
-    # Apply migrations up to current version (3)
+    # Apply migrations up to current version (6: adds sensor_status, destination_port and ingested_at; migration 3 behaviour is unchanged)
     new_version = apply_migrations(conn)
-    assert new_version == 3
+    assert new_version == 6
 
     cursor = conn.cursor()
     cursor.execute("SELECT threat_type FROM alerts WHERE id = 1;")

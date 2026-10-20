@@ -10,13 +10,14 @@ from config.settings import (
     THREAT_TYPE_VOLUMETRIC,
 )
 from database.database import insert_alert
+from tests.support import authed_client
 
 
 @pytest.fixture
 def client():
     """Flask test client fixture."""
     app.config["TESTING"] = True
-    return app.test_client()
+    return authed_client(app)
 
 
 class TestBackendApi:
@@ -29,200 +30,17 @@ class TestBackendApi:
         assert "text/html" in response.content_type
         html_content = response.get_data(as_text=True)
         assert "SentinelX" in html_content
-        assert "Network Intrusion Detection & Threat Monitoring System" in html_content
-
-    def test_dashboard_p0_features_and_xss_safety(self, client):
-        """Verify dashboard/index.html implements P0 features, destination_ip, health probe, and XSS safety."""
-        response = client.get("/")
-        assert response.status_code == 200
-        content = response.get_data(as_text=True)
-
-        # Destination IP vector rendering
-        assert "destination_ip" in content
-        assert "vector-arrow" in content
-        assert "ip-source" in content
-        assert "ip-dest" in content
-
-        # Live /health probe
-        assert "/health" in content
-        assert "checkHealth" in content
-        assert "ENGINE ONLINE" in content
-
-        # Keyed DOM reconciliation
-        assert "data-alert-id" in content
-        assert "insertBefore" in content
-
-        # Human-friendly timestamp
-        assert "formatTimestamp" in content
-
-        # XSS safety: no innerHTML or insertAdjacentHTML anywhere in the file
-        assert "innerHTML" not in content, "Found unsafe innerHTML in dashboard/index.html!"
-        assert "insertAdjacentHTML" not in content
-        assert "document.write" not in content
-
-    def test_dashboard_p1_investigation_and_interaction_features(self, client):
-        """Verify dashboard/index.html implements Phase 6B P1 features:
-        search, threat filters, severity filters, threat distribution bar,
-        detail inspection drawer with genuine API fields only, clipboard copy,
-        and strict XSS prevention."""
-        response = client.get("/")
-        assert response.status_code == 200
-        content = response.get_data(as_text=True)
-
-        # 1. UI State Model
-        assert "UI_STATE" in content
-        assert "searchQuery" in content
-        assert "threatFilter" in content
-        assert "severityFilter" in content
-        assert "expandedAlertId" in content
-
-        # 2. Search input & clear button
-        assert "alert-search" in content
-        assert "search-clear-btn" in content
-        assert "Search by IP, message, threat, ID..." in content
-
-        # 3. Filter buttons (Threat & Severity)
-        assert 'data-threat="ALL"' in content
-        assert 'data-threat="PORT_SCAN"' in content
-        assert 'data-threat="HIGH_TRAFFIC"' in content
-        assert 'data-severity="ALL"' in content
-        assert 'data-severity="HIGH"' in content
-        assert 'data-severity="MEDIUM"' in content
-        assert 'data-severity="LOW"' in content
-
-        # 4. Result counter & empty state reset
-        assert "alerts-count-badge" in content
-        assert "filter-reset-btn" in content
-        assert "empty-state-row" in content
-
-        # 5. Cumulative Threat Distribution Bar
-        assert "threat-distribution-card" in content
-        assert "threat-distribution-bar" in content
-        assert "dist-bar-scans" in content
-        assert "dist-bar-traffic" in content
-        assert "dist-bar-empty" in content
-        assert "updateThreatDistribution" in content
-
-        # 6. Expandable Detail Inspection Drawer
-        assert "createAlertDetailRow" in content
-        assert "alert-detail-row" in content
-        assert "handleRowToggle" in content
-        assert "evidence-box" in content
-        assert "data-detail-for" in content
-
-        # 7. Clipboard Copy
-        assert "copyToClipboard" in content
-        assert "copy-btn" in content
-
-        # 8. Selection protection
-        assert "window.getSelection" in content
-
-        # 9. Strict rejection of fabricated/hallucinated fields (e.g. Unicast IPv4)
-        assert "Unicast IPv4" not in content, "Found banned 'Unicast IPv4' field in dashboard/index.html!"
-        assert "Vector: Unicast IPv4" not in content
-
-        # 10. Strict XSS prevention: verify zero innerHTML, insertAdjacentHTML, document.write, or eval
-        assert "innerHTML" not in content
-        assert "insertAdjacentHTML" not in content
-        assert "document.write" not in content
-        assert "eval(" not in content
-
-    def test_security_headers_present_on_all_responses(self, client):
-        """Verify defensive HTTP security headers including CSP and Permissions-Policy are injected into all HTTP responses."""
-        endpoints = ["/", "/health", "/api/health", "/api/alerts", "/api/stats"]
-        expected_csp_parts = [
-            "default-src 'none'",
-            "script-src 'self' 'unsafe-inline'",
-            "style-src 'self' 'unsafe-inline'",
-            "connect-src 'self' http://127.0.0.1:5000",
-            "img-src 'self' data:",
-            "frame-ancestors 'none'",
-            "base-uri 'none'",
-            "form-action 'none'",
-        ]
-        expected_perm_parts = [
-            "camera=()",
-            "microphone=()",
-            "geolocation=()",
-            "payment=()",
-            "usb=()",
-            "bluetooth=()",
-            "display-capture=()",
-            "clipboard-write=(self)",
-        ]
-        for ep in endpoints:
-            response = client.get(ep)
-            assert response.headers.get("X-Content-Type-Options") == "nosniff", f"Missing nosniff on {ep}"
-            assert response.headers.get("X-Frame-Options") == "SAMEORIGIN", f"Missing SAMEORIGIN on {ep}"
-            assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin", (
-                f"Missing Referrer-Policy on {ep}"
-            )
-            assert response.headers.get("X-XSS-Protection") == "1; mode=block", f"Missing X-XSS-Protection on {ep}"
-
-            # Content-Security-Policy
-            csp = response.headers.get("Content-Security-Policy", "")
-            assert csp, f"Missing Content-Security-Policy on {ep}"
-            for part in expected_csp_parts:
-                assert part in csp, f"Directive '{part}' missing from CSP on {ep}"
-
-            # Permissions-Policy
-            perm = response.headers.get("Permissions-Policy", "")
-            assert perm, f"Missing Permissions-Policy on {ep}"
-            for part in expected_perm_parts:
-                assert part in perm, f"Directive '{part}' missing from Permissions-Policy on {ep}"
-
-    def test_dynamic_api_cache_control_headers(self, client):
-        """Verify dynamic API and health endpoints forbid client/proxy caching."""
-        for ep in ["/api/alerts", "/api/stats", "/health", "/api/health"]:
-            response = client.get(ep)
-            cache_ctrl = response.headers.get("Cache-Control", "")
-            assert "no-store" in cache_ctrl
-            assert "no-cache" in cache_ctrl
-            assert response.headers.get("Pragma") == "no-cache"
-
-        # Static / root page should not enforce no-store
-        root_resp = client.get("/")
-        assert "no-store" not in root_resp.headers.get("Cache-Control", "")
-
-    def test_cors_origin_scoping(self, client, monkeypatch):
-        """Verify CORS headers are returned for allowed local origins, rejected for Origin: null by default, allowed when opt-in enabled, and omitted for untrusted origins."""
-        # Allowed local origin
-        resp_allowed = client.get("/api/stats", headers={"Origin": "http://127.0.0.1:5000"})
-        assert resp_allowed.headers.get("Access-Control-Allow-Origin") == "http://127.0.0.1:5000"
-        assert resp_allowed.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
-
-        # By default, Origin: null (local file:// / sandboxed iframe) is REJECTED
-        for ep in ["/api/stats", "/api/alerts"]:
-            resp_null = client.get(ep, headers={"Origin": "null"})
-            assert resp_null.status_code == 200
-            assert "Access-Control-Allow-Origin" not in resp_null.headers
-
-        # Untrusted origin
-        resp_untrusted = client.get("/api/stats", headers={"Origin": "http://attacker.example.com"})
-        assert "Access-Control-Allow-Origin" not in resp_untrusted.headers
-
-        # With explicit opt-in (ALLOW_LOCAL_FILE_CORS = True), Origin: null is permitted
-        monkeypatch.setattr("backend.api.ALLOW_LOCAL_FILE_CORS", True)
-        for ep in ["/api/stats", "/api/alerts"]:
-            resp_optin = client.get(ep, headers={"Origin": "null"})
-            assert resp_optin.status_code == 200
-            assert resp_optin.headers.get("Access-Control-Allow-Origin") == "null"
-            assert resp_optin.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
-
-            resp_preflight = client.open(ep, method="OPTIONS", headers={"Origin": "null"})
-            assert resp_preflight.status_code == 204
-            assert resp_preflight.headers.get("Access-Control-Allow-Origin") == "null"
-            assert resp_preflight.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
+        assert '<main id="main"' in html_content and "/static/js/main.js" in html_content
 
     def test_health_check_endpoint(self, client):
-        """Verify /health and /api/health return healthy status and database connectivity."""
-        for path in ["/health", "/api/health"]:
+        """Verify /health returns healthy status and database connectivity."""
+        for path in ["/health"]:
             response = client.get(path)
             assert response.status_code == 200
             data = response.get_json()
             assert data["status"] == "healthy"
             assert data["service"] == "SentinelX API"
-            assert data["database"] == "connected"
+            assert data["database"] == "readable"
             assert "timestamp" in data
 
     def test_health_check_unhealthy_when_database_fails(self, client, monkeypatch):
@@ -231,12 +49,12 @@ class TestBackendApi:
         def broken_conn():
             raise RuntimeError("Database unavailable")
 
-        monkeypatch.setattr("backend.api.get_connection", broken_conn)
+        monkeypatch.setattr("backend.api.get_readonly_connection", broken_conn)
         response = client.get("/health")
         assert response.status_code == 503
         data = response.get_json()
-        assert data["status"] == "unhealthy"
-        assert data["database"] == "disconnected"
+        assert data["status"] == "degraded"
+        assert data["database"] == "unreadable"
 
     def test_alerts_default_pagination(self, client):
         """Verify /api/alerts defaults to API_DEFAULT_LIMIT (100) and returns a JSON list."""
@@ -254,7 +72,7 @@ class TestBackendApi:
                 }
             )
 
-        response = client.get("/api/alerts")
+        response = client.get("/api/v1/alerts")
         assert response.status_code == 200
         alerts = response.get_json()
 
@@ -282,7 +100,7 @@ class TestBackendApi:
             )
 
         # Fetch 5 alerts skipping the first 5 (IDs should be 15, 14, 13, 12, 11)
-        response = client.get("/api/alerts?limit=5&offset=5")
+        response = client.get("/api/v1/alerts?limit=5&offset=5")
         assert response.status_code == 200
         alerts = response.get_json()
         assert len(alerts) == 5
@@ -313,20 +131,20 @@ class TestBackendApi:
             }
         )
 
-        resp_scan = client.get(f"/api/alerts?threat_type={THREAT_TYPE_PORT_SCAN}")
+        resp_scan = client.get(f"/api/v1/alerts?threat_type={THREAT_TYPE_PORT_SCAN}")
         assert resp_scan.status_code == 200
         scan_alerts = resp_scan.get_json()
         assert len(scan_alerts) == 1
         assert scan_alerts[0]["threat_type"] == THREAT_TYPE_PORT_SCAN
 
-        resp_traffic = client.get(f"/api/alerts?threat_type={THREAT_TYPE_VOLUMETRIC}")
+        resp_traffic = client.get(f"/api/v1/alerts?threat_type={THREAT_TYPE_VOLUMETRIC}")
         assert resp_traffic.status_code == 200
         traffic_alerts = resp_traffic.get_json()
         assert len(traffic_alerts) == 1
         assert traffic_alerts[0]["threat_type"] == THREAT_TYPE_VOLUMETRIC
 
         # Backward compatibility filter check: API accepts legacy HIGH_TRAFFIC query
-        resp_legacy = client.get("/api/alerts?threat_type=HIGH_TRAFFIC")
+        resp_legacy = client.get("/api/v1/alerts?threat_type=HIGH_TRAFFIC")
         assert resp_legacy.status_code == 200
         assert len(resp_legacy.get_json()) == 1
 
@@ -367,7 +185,7 @@ class TestBackendApi:
         )
 
         # Filter by source_ip and severity
-        resp = client.get("/api/alerts?source_ip=172.16.0.5&severity=HIGH")
+        resp = client.get("/api/v1/alerts?source_ip=172.16.0.5&severity=HIGH")
         assert resp.status_code == 200
         alerts = resp.get_json()
         assert len(alerts) == 1
@@ -377,14 +195,14 @@ class TestBackendApi:
     def test_alerts_parameter_validation_errors(self, client):
         """Verify structured 400 Bad Request responses on invalid query parameters."""
         test_cases = [
-            ("/api/alerts?limit=-1", "must be between 1 and"),
-            ("/api/alerts?limit=0", "must be between 1 and"),
-            (f"/api/alerts?limit={API_MAX_LIMIT + 1}", "must be between 1 and"),
-            ("/api/alerts?limit=abc", "must be an integer"),
-            ("/api/alerts?offset=-5", "cannot be negative"),
-            ("/api/alerts?offset=xyz", "must be an integer"),
-            ("/api/alerts?threat_type=SQL_INJECTION", "must be one of"),
-            ("/api/alerts?severity=SUPER_HIGH", "must be 'HIGH', 'MEDIUM', or 'LOW'"),
+            ("/api/v1/alerts?limit=-1", "must be between 1 and"),
+            ("/api/v1/alerts?limit=0", "must be between 1 and"),
+            (f"/api/v1/alerts?limit={API_MAX_LIMIT + 1}", "must be between 1 and"),
+            ("/api/v1/alerts?limit=abc", "must be an integer"),
+            ("/api/v1/alerts?offset=-5", "must be between 0 and"),
+            ("/api/v1/alerts?offset=xyz", "must be an integer"),
+            ("/api/v1/alerts?threat_type=SQL_INJECTION", "must be one of"),
+            ("/api/v1/alerts?severity=SUPER_HIGH", "must be 'HIGH', 'MEDIUM', or 'LOW'"),
         ]
 
         for query, expected_snippet in test_cases:
@@ -452,7 +270,7 @@ class TestBackendApi:
             }
         )
 
-        response = client.get("/api/stats")
+        response = client.get("/api/v1/stats")
         assert response.status_code == 200
         stats = response.get_json()
 
@@ -466,11 +284,11 @@ class TestBackendApi:
 
     def test_empty_database_handling(self, client):
         """Verify API handles an empty database gracefully without null/None crashes."""
-        resp_alerts = client.get("/api/alerts")
+        resp_alerts = client.get("/api/v1/alerts")
         assert resp_alerts.status_code == 200
         assert resp_alerts.get_json() == []
 
-        resp_stats = client.get("/api/stats")
+        resp_stats = client.get("/api/v1/stats")
         assert resp_stats.status_code == 200
         stats = resp_stats.get_json()
         assert stats == {
@@ -517,11 +335,11 @@ class TestBackendApi:
             )
 
         def request_worker(task_id):
-            c = app.test_client()
+            c = authed_client(app)
             if task_id % 3 == 0:
-                resp = c.get("/api/alerts")
+                resp = c.get("/api/v1/alerts")
             elif task_id % 3 == 1:
-                resp = c.get("/api/stats")
+                resp = c.get("/api/v1/stats")
             else:
                 resp = c.get("/health")
             return resp.status_code

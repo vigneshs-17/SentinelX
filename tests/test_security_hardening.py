@@ -7,7 +7,6 @@ import pytest
 from scapy.all import ARP, IP, TCP, UDP, Ether, IPv6
 
 from capture.packet_parser import parse_packet
-from config.settings import ALLOW_LOCAL_FILE_CORS, CORS_ALLOWED_ORIGINS
 from logs.alert_logger import (
     log_alert,
     read_alerts,
@@ -155,59 +154,6 @@ class TestAlertLoggerHardening:
         assert not errors, f"Concurrent logging produced errors: {errors}"
         alerts = read_alerts(log_file)
         assert len(alerts) == 100
-
-
-# =============================================================================
-# 3. P1 — CORS Origin: null Lockdown Tests
-# =============================================================================
-
-
-class TestCORSSecurityLockdown:
-    """Tests for CORS Origin: null rejection and opt-in security."""
-
-    @pytest.fixture
-    def client(self):
-        from backend.api import app
-
-        app.config["TESTING"] = True
-        with app.test_client() as c:
-            yield c
-
-    def test_default_cors_settings_do_not_contain_null(self):
-        """Verify that null is not in CORS_ALLOWED_ORIGINS by default."""
-        assert "null" not in CORS_ALLOWED_ORIGINS
-        assert ALLOW_LOCAL_FILE_CORS is False
-
-    def test_origin_null_blocked_by_default_on_all_endpoints(self, client):
-        """Verify that requests presenting Origin: null do not receive Access-Control-Allow-Origin."""
-        for endpoint in ["/api/stats", "/api/alerts"]:
-            resp = client.get(endpoint, headers={"Origin": "null"})
-            assert resp.status_code == 200
-            assert "Access-Control-Allow-Origin" not in resp.headers
-
-    def test_options_preflight_origin_null_blocked_by_default(self, client):
-        """Verify OPTIONS preflight requests presenting Origin: null do not receive CORS permission."""
-        for endpoint in ["/api/stats", "/api/alerts"]:
-            resp = client.open(endpoint, method="OPTIONS", headers={"Origin": "null"})
-            assert resp.status_code == 204
-            assert "Access-Control-Allow-Origin" not in resp.headers
-
-    def test_origin_null_allowed_when_opt_in_enabled(self, client, monkeypatch):
-        """Verify that setting ALLOW_LOCAL_FILE_CORS permits Origin: null."""
-        monkeypatch.setattr("backend.api.ALLOW_LOCAL_FILE_CORS", True)
-
-        for endpoint in ["/api/stats", "/api/alerts"]:
-            resp = client.get(endpoint, headers={"Origin": "null"})
-            assert resp.status_code == 200
-            assert resp.headers.get("Access-Control-Allow-Origin") == "null"
-            assert resp.headers.get("Access-Control-Allow-Methods") == "GET, OPTIONS"
-
-    def test_untrusted_origins_always_blocked(self, client):
-        """Verify arbitrary external origins are rejected."""
-        untrusted = ["http://attacker.com", "https://phishing.site", "http://192.168.1.50:8080"]
-        for origin in untrusted:
-            resp = client.get("/api/stats", headers={"Origin": origin})
-            assert "Access-Control-Allow-Origin" not in resp.headers
 
 
 # =============================================================================

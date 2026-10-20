@@ -37,19 +37,6 @@ PARTITION_CAP_COOLDOWNS = int(os.getenv("SENTINELX_CAP_COOLDOWNS", "1000"))
 PARTITION_CAP_FLOWS = int(os.getenv("SENTINELX_CAP_FLOWS", "50000"))
 PARTITION_CAP_FLOW_SOURCES = int(os.getenv("SENTINELX_CAP_FLOW_SOURCES", "5000"))
 
-MAX_TRACKED_ENTRIES = int(
-    os.getenv(
-        "SENTINELX_MAX_TRACKED_ENTRIES",
-        str(
-            PARTITION_CAP_VERTICAL
-            + PARTITION_CAP_HORIZONTAL
-            + PARTITION_CAP_SLOW_SCAN
-            + PARTITION_CAP_SYN_FLOOD_AGGREGATES
-            + PARTITION_CAP_VOLUMETRIC
-            + PARTITION_CAP_COOLDOWNS
-        ),
-    )
-)
 DETECTION_STATE_TTL = float(os.getenv("SENTINELX_STATE_TTL", "60.0"))
 
 # Port scan detection
@@ -87,9 +74,7 @@ VOLUMETRIC_TOP_TALKERS_MAX = int(os.getenv("SENTINELX_VOLUMETRIC_TOP_TALKERS_MAX
 LOCAL_NETWORKS = os.getenv("SENTINELX_LOCAL_NETWORKS", "")
 
 # Pipeline & Architecture Configuration
-CAPTURE_MODE = os.getenv("SENTINELX_MODE", "live").lower()
 CAPTURE_INTERFACE = os.getenv("SENTINELX_INTERFACE", None)
-PCAP_FILE_PATH = os.getenv("SENTINELX_PCAP_PATH", None)
 QUEUE_MAXSIZE = int(os.getenv("SENTINELX_QUEUE_SIZE", "10000"))
 QUEUE_TIMEOUT = float(os.getenv("SENTINELX_QUEUE_TIMEOUT", "0.5"))
 LOG_LEVEL = os.getenv("SENTINELX_LOG_LEVEL", "INFO")
@@ -103,22 +88,61 @@ ML_MODEL_DIR = os.getenv("SENTINELX_ML_MODEL_DIR", "models")
 # Backend & REST API Configuration
 API_HOST = os.getenv("SENTINELX_API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("SENTINELX_API_PORT", "5000"))
-API_DEBUG = os.getenv("SENTINELX_API_DEBUG", "false").lower() == "true"
 API_DEFAULT_LIMIT = int(os.getenv("SENTINELX_API_DEFAULT_LIMIT", "100"))
 API_MAX_LIMIT = int(os.getenv("SENTINELX_API_MAX_LIMIT", "500"))
-ALLOW_LOCAL_FILE_CORS = os.getenv("SENTINELX_ALLOW_LOCAL_FILE_CORS", "false").lower() == "true"
-CORS_ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv("SENTINELX_CORS_ORIGINS", "http://127.0.0.1:5000,http://localhost:5000").split(",")
-    if origin.strip()
-]
 
 # Storage & Sensor Configuration
 DATA_DIR = Path(os.getenv("SENTINELX_DATA_DIR", "data"))
-DEFAULT_DATABASE_FILE = DATA_DIR / "sentinelx.db"
+DEFAULT_DATABASE_FILE = DATA_DIR / "alerts.db"  # written by the sensor, opened read-only by the API
+DEFAULT_APP_DATABASE_FILE = DATA_DIR / "app.db"  # owned by the API: users, sessions, triage, audit log
 DEFAULT_ALERT_FILE = DATA_DIR / "alerts.jsonl"
 SENSOR_ID = os.getenv("SENTINELX_SENSOR_ID", "sensor-1")
 STATS_INTERVAL = float(os.getenv("SENTINELX_STATS_INTERVAL", "10.0"))
+
+# Sensor operations
+RETENTION_DAYS = int(os.getenv("SENTINELX_RETENTION_DAYS", "30"))  # 0 disables the automatic daily prune
+AUDIT_RETENTION_DAYS = int(os.getenv("SENTINELX_AUDIT_RETENTION_DAYS", "365"))  # 0 = keep the audit log forever
+RETENTION_INTERVAL_SECONDS = float(os.getenv("SENTINELX_RETENTION_INTERVAL", "86400"))
+SENSOR_STATUS_INTERVAL = float(os.getenv("SENTINELX_STATUS_INTERVAL", "10.0"))
+SENSOR_OFFLINE_AFTER = float(os.getenv("SENTINELX_SENSOR_OFFLINE_AFTER", "30.0"))
+SENSOR_STATUS_RETENTION_HOURS = float(os.getenv("SENTINELX_STATUS_RETENTION_HOURS", "48"))
+API_THREADS = int(os.getenv("SENTINELX_API_THREADS", "16"))
+
+# API protection
+API_RATE_LIMIT_PER_MIN = int(os.getenv("SENTINELX_RATE_LIMIT", "120"))  # per identity (user/key) or IP, on /api/v1/*
+LOGIN_RATE_LIMIT_PER_MIN = int(os.getenv("SENTINELX_LOGIN_RATE_LIMIT", "10"))  # per IP, on /login
+RATE_LIMIT_MAX_BUCKETS = int(os.getenv("SENTINELX_RATE_LIMIT_BUCKETS", "10000"))
+TRUSTED_PROXIES = [p.strip() for p in os.getenv("SENTINELX_TRUSTED_PROXIES", "").split(",") if p.strip()]
+MAX_STREAMS = int(os.getenv("SENTINELX_MAX_STREAMS", "8"))  # concurrent SSE connections; each holds a waitress thread
+STREAM_INTERVAL_SECONDS = float(os.getenv("SENTINELX_STREAM_INTERVAL", "2.0"))
+STREAM_HEARTBEAT_SECONDS = float(os.getenv("SENTINELX_STREAM_HEARTBEAT", "15.0"))
+
+# Console data limits
+EXPORT_MAX_ROWS = int(os.getenv("SENTINELX_EXPORT_MAX_ROWS", "10000"))  # hard cap on CSV/JSON export size
+GRAPH_MAX_NODES = int(os.getenv("SENTINELX_GRAPH_MAX_NODES", "200"))
+GRAPH_MAX_EDGES = int(os.getenv("SENTINELX_GRAPH_MAX_EDGES", "600"))
+DROP_WARN_RATIO = float(os.getenv("SENTINELX_DROP_WARN_RATIO", "0.01"))  # sensor health warning threshold
+
+# Authentication & sessions
+HTTPS_ENABLED = os.getenv("SENTINELX_HTTPS", "false").lower() == "true"  # sets the Secure cookie flag
+SESSION_IDLE_SECONDS = float(os.getenv("SENTINELX_SESSION_IDLE", "1800"))  # 30 min
+SESSION_ABSOLUTE_SECONDS = float(os.getenv("SENTINELX_SESSION_ABSOLUTE", "43200"))  # 12 h
+PASSWORD_MIN_LENGTH = int(os.getenv("SENTINELX_PASSWORD_MIN_LENGTH", "12"))
+LOGIN_MAX_FAILURES = int(os.getenv("SENTINELX_LOGIN_MAX_FAILURES", "5"))  # per IP and per username, in the window
+LOGIN_WINDOW_SECONDS = float(os.getenv("SENTINELX_LOGIN_WINDOW", "900"))
+LOGIN_LOCK_BASE_SECONDS = float(os.getenv("SENTINELX_LOGIN_LOCK_BASE", "30"))  # doubles with each further failure
+LOGIN_LOCK_MAX_SECONDS = float(os.getenv("SENTINELX_LOGIN_LOCK_MAX", "900"))
+TRIAGE_NOTE_MAX_CHARS = 2000
+
+# Alert notifications (webhook). The URL itself is a secret: read only from the environment variable named
+# below, never stored in this module, logged, or returned by the API.
+WEBHOOK_URL_ENV = "SENTINELX_WEBHOOK_URL"
+WEBHOOK_MODE = os.getenv("SENTINELX_WEBHOOK_MODE", "generic").lower()  # generic | slack | discord
+WEBHOOK_COOLDOWN = float(os.getenv("SENTINELX_WEBHOOK_COOLDOWN", "60.0"))  # per (threat_type, source_ip), event time
+WEBHOOK_QUEUE_MAXSIZE = int(os.getenv("SENTINELX_WEBHOOK_QUEUE", "1000"))
+WEBHOOK_RETRIES = int(os.getenv("SENTINELX_WEBHOOK_RETRIES", "3"))
+WEBHOOK_BACKOFF_SECONDS = float(os.getenv("SENTINELX_WEBHOOK_BACKOFF", "1.0"))
+WEBHOOK_TIMEOUT_SECONDS = float(os.getenv("SENTINELX_WEBHOOK_TIMEOUT", "5.0"))
 
 # Severity Ratio Thresholds (Observed / Threshold)
 SEVERITY_RATIO_HIGH = float(os.getenv("SENTINELX_SEVERITY_RATIO_HIGH", "3.0"))
@@ -146,6 +170,17 @@ def validate_config(config_dict: dict[str, Any] | None = None) -> None:
         "PARTITION_CAP_COOLDOWNS",
         "PARTITION_CAP_FLOWS",
         "PARTITION_CAP_FLOW_SOURCES",
+        "API_THREADS",
+        "EXPORT_MAX_ROWS",
+        "GRAPH_MAX_NODES",
+        "GRAPH_MAX_EDGES",
+        "API_RATE_LIMIT_PER_MIN",
+        "LOGIN_RATE_LIMIT_PER_MIN",
+        "RATE_LIMIT_MAX_BUCKETS",
+        "MAX_STREAMS",
+        "LOGIN_MAX_FAILURES",
+        "PASSWORD_MIN_LENGTH",
+        "WEBHOOK_QUEUE_MAXSIZE",
         "VOLUMETRIC_WARMUP_WINDOWS",
         "VOLUMETRIC_MIN_PACKETS",
         "VOLUMETRIC_TOP_TALKERS_MAX",
@@ -171,11 +206,44 @@ def validate_config(config_dict: dict[str, Any] | None = None) -> None:
         "DETECTION_STATE_TTL",
         "FLOW_ACTIVE_TIMEOUT",
         "FLOW_IDLE_TIMEOUT",
+        "RETENTION_INTERVAL_SECONDS",
+        "SENSOR_STATUS_INTERVAL",
+        "SENSOR_OFFLINE_AFTER",
+        "SENSOR_STATUS_RETENTION_HOURS",
+        "WEBHOOK_COOLDOWN",
+        "WEBHOOK_BACKOFF_SECONDS",
+        "WEBHOOK_TIMEOUT_SECONDS",
+        "STREAM_INTERVAL_SECONDS",
+        "DROP_WARN_RATIO",
+        "STREAM_HEARTBEAT_SECONDS",
+        "SESSION_IDLE_SECONDS",
+        "SESSION_ABSOLUTE_SECONDS",
+        "LOGIN_WINDOW_SECONDS",
+        "LOGIN_LOCK_BASE_SECONDS",
+        "LOGIN_LOCK_MAX_SECONDS",
     ]
     for key in positive_float_keys:
         val = cfg.get(key)
         if val is not None and (not isinstance(val, (int, float)) or val <= 0):
             raise ValueError(f"Configuration {key} must be a positive number, got: {val}")
+
+    retention = cfg.get("RETENTION_DAYS")
+    if retention is not None and (not isinstance(retention, int) or retention < 0):
+        raise ValueError(f"RETENTION_DAYS must be an integer >= 0 (0 disables pruning), got: {retention}")
+
+    audit_retention = cfg.get("AUDIT_RETENTION_DAYS")
+    if audit_retention is not None and (not isinstance(audit_retention, int) or audit_retention < 0):
+        raise ValueError(
+            f"AUDIT_RETENTION_DAYS must be an integer >= 0 (0 keeps the audit log forever), got: {audit_retention}"
+        )
+
+    retries = cfg.get("WEBHOOK_RETRIES")
+    if retries is not None and (not isinstance(retries, int) or retries < 0):
+        raise ValueError(f"WEBHOOK_RETRIES must be an integer >= 0, got: {retries}")
+
+    mode = cfg.get("WEBHOOK_MODE")
+    if mode is not None and mode not in ("generic", "slack", "discord"):
+        raise ValueError(f"WEBHOOK_MODE must be generic, slack or discord, got: {mode}")
 
     alpha = cfg.get("VOLUMETRIC_EWMA_ALPHA")
     if alpha is not None and (not isinstance(alpha, (int, float)) or not (0.0 < alpha <= 1.0)):

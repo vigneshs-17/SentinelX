@@ -11,7 +11,7 @@ from datetime import UTC, datetime, tzinfo
 
 logger = logging.getLogger("sentinelx.migrations")
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 6
 
 
 def convert_legacy_timestamp_to_utc(ts_str: str, local_tz: tzinfo | None = None) -> str:
@@ -119,6 +119,57 @@ def migration_3(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE alerts SET threat_type = 'VOLUMETRIC' WHERE threat_type = 'HIGH_TRAFFIC';")
 
 
+def migration_4(conn: sqlite3.Connection) -> None:
+    """
+    Migration 4: sensor_status heartbeat history (one row per sensor per interval), written by the sensor
+    and read by the API for /api/v1/metrics and the health sparklines.
+    """
+    logger.info("Applying migration 4: sensor_status")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sensor_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sensor_id TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            received INTEGER NOT NULL,
+            dropped INTEGER NOT NULL,
+            queue_depth INTEGER NOT NULL,
+            pps_10s REAL NOT NULL,
+            state_size INTEGER NOT NULL,
+            evictions INTEGER NOT NULL,
+            webhook_failures INTEGER NOT NULL
+        );
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sensor_status_seen ON sensor_status(sensor_id, last_seen);")
+
+
+def migration_5(conn: sqlite3.Connection) -> None:
+    """Migration 5: keep the destination port (needed for top-targeted-ports and port filtering)."""
+    logger.info("Applying migration 5: alerts.destination_port")
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(alerts);")}
+    if "destination_port" not in cols:
+        conn.execute("ALTER TABLE alerts ADD COLUMN destination_port INTEGER;")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_dport ON alerts(destination_port);")
+
+
+def migration_6(conn: sqlite3.Connection) -> None:
+    """
+    Migration 6 (N1): ingested_at, the wall-clock UTC time a row was inserted. Retention prunes by this column,
+    never by event time (detected_at), so replaying an old capture cannot delete its own alerts. Existing rows
+    are stamped with the migration time: they age from the upgrade, so no row is deleted earlier than before.
+    """
+    logger.info("Applying migration 6: alerts.ingested_at")
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(alerts);")}
+    if "ingested_at" not in cols:
+        conn.execute("ALTER TABLE alerts ADD COLUMN ingested_at TEXT;")
+    conn.execute(
+        "UPDATE alerts SET ingested_at = ? WHERE ingested_at IS NULL;",
+        (datetime.now(UTC).isoformat(timespec="seconds"),),
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_ingested_at ON alerts(ingested_at);")
+
+
 def apply_migrations(conn: sqlite3.Connection, local_tz: tzinfo | None = None) -> int:
     """
     Idempotently inspects database PRAGMA user_version and applies all pending
@@ -149,5 +200,26 @@ def apply_migrations(conn: sqlite3.Connection, local_tz: tzinfo | None = None) -
             conn.execute("PRAGMA user_version = 3;")
         current_version = 3
         logger.info("Database upgraded to user_version=3")
+
+    if current_version < 4:
+        with conn:
+            migration_4(conn)
+            conn.execute("PRAGMA user_version = 4;")
+        current_version = 4
+        logger.info("Database upgraded to user_version=4")
+
+    if current_version < 5:
+        with conn:
+            migration_5(conn)
+            conn.execute("PRAGMA user_version = 5;")
+        current_version = 5
+        logger.info("Database upgraded to user_version=5")
+
+    if current_version < 6:
+        with conn:
+            migration_6(conn)
+            conn.execute("PRAGMA user_version = 6;")
+        current_version = 6
+        logger.info("Database upgraded to user_version=6")
 
     return current_version

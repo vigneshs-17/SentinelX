@@ -32,10 +32,6 @@ def get_alert_file_path() -> Path:
     return data_dir / "alerts.jsonl"
 
 
-# Preserve ALERT_FILE for backwards compatibility
-ALERT_FILE = get_alert_file_path()
-
-
 def _rotate_file(file_path: Path, max_backups: int = DEFAULT_MAX_LOG_BACKUPS) -> None:
     """
     Performs log file rotation when current file size reaches limit.
@@ -85,23 +81,17 @@ def _rotate_file(file_path: Path, max_backups: int = DEFAULT_MAX_LOG_BACKUPS) ->
             pass
 
 
-def log_alert(alert: dict[str, Any]) -> dict[str, Any]:
+def normalize_alert(alert: dict[str, Any]) -> dict[str, Any]:
     """
-    Logs an alert record to append-only JSONL storage and SQLite.
-    Timestamps are formatted as ISO-8601 UTC with explicit offset (+00:00).
+    Return a copy of the alert with detected_at and timestamp filled in (ISO-8601 UTC with +00:00).
+    Engine alerts already carry event-time detected_at; the wall clock is only a fallback for alerts without one.
     """
-    # Note: In Phase 2, detected_at is recorded as processing time (ISO-8601 UTC with offset).
-    # Phase 3 switches this to packet event time.
-    now_utc = datetime.now(UTC).isoformat(timespec="seconds")
-    detected_at = alert.get("detected_at") or now_utc
-    timestamp = alert.get("timestamp") or detected_at
+    detected_at = alert.get("detected_at") or datetime.now(UTC).isoformat(timespec="seconds")
+    return {**alert, "detected_at": detected_at, "timestamp": alert.get("timestamp") or detected_at}
 
-    alert_record = {
-        **alert,
-        "detected_at": detected_at,
-        "timestamp": timestamp,
-    }
 
+def append_jsonl(record: dict[str, Any]) -> None:
+    """Append one normalized record to the JSONL file, rotating by size."""
     alert_file = get_alert_file_path()
     alert_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -112,15 +102,18 @@ def log_alert(alert: dict[str, Any]) -> dict[str, Any]:
         if alert_file.exists() and alert_file.stat().st_size >= max_size:
             _rotate_file(alert_file, max_backups)
 
-        line = json.dumps(alert_record, ensure_ascii=False) + "\n"
+        line = json.dumps(record, ensure_ascii=False) + "\n"
         with open(alert_file, "a", encoding="utf-8") as file:
             file.write(line)
             file.flush()
 
-        # Store in SQLite database
-        insert_alert(alert_record)
 
-    return alert_record
+def log_alert(alert: dict[str, Any]) -> dict[str, Any]:
+    """Log one alert to JSONL and SQLite (errors propagate). Returns the normalized record."""
+    record = normalize_alert(alert)
+    append_jsonl(record)
+    insert_alert(record)
+    return record
 
 
 def read_alerts(file_path: Path | None = None) -> list[dict[str, Any]]:

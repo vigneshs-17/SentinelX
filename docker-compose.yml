@@ -1,0 +1,60 @@
+# SentinelX on Linux. The sensor shares the host network namespace to see the host NIC and holds only
+# NET_RAW (never privileged, no NET_ADMIN: nothing in the capture path needs it, but live capture inside the
+# container has not been tested in CI. If promiscuous capture fails on your kernel, add NET_ADMIN here and in the
+# Dockerfile setcap line, and tell us). The API is a separate, unprivileged container with a read-only root
+# filesystem, published on 127.0.0.1 only; it mounts the alerts volume read-only and has its own app.db volume.
+#
+# First run (creates the admin before the API will serve):
+#   docker compose run --rm api python main.py user add admin --role admin
+#   docker compose up -d
+#
+# Docker Desktop on Windows/macOS cannot capture the host NIC (network_mode: host is a VM-internal network
+# there). On Windows run the sensor natively with Npcap (python main.py sensor) and keep only the API in Docker,
+# or run everything natively.
+
+services:
+  sensor:
+    build:
+      context: .
+      target: sensor
+    image: sentinelx-sensor:local
+    network_mode: host
+    cap_drop: [ALL]
+    cap_add: [NET_RAW]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      SENTINELX_INTERFACE: ${SENTINELX_INTERFACE:-}
+      SENTINELX_RETENTION_DAYS: ${SENTINELX_RETENTION_DAYS:-30}
+      SENTINELX_WEBHOOK_URL: ${SENTINELX_WEBHOOK_URL:-}
+    volumes:
+      - alerts:/data/alerts
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: api
+    image: sentinelx-api:local
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      SENTINELX_API_PORT: "5000"
+      SENTINELX_TRUSTED_PROXIES: ${SENTINELX_TRUSTED_PROXIES:-}
+      SENTINELX_HTTPS: ${SENTINELX_HTTPS:-false}
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - alerts:/data/alerts:ro
+      - appdata:/data/app
+    depends_on:
+      sensor:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  alerts:
+  appdata:
