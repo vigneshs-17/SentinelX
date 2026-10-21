@@ -16,12 +16,15 @@ This module provides a deterministic, seeded synthetic traffic generator and aut
 2. `benign_bulk_download`: Sustained transfer of 60 s at ~4,200 packets/s with 1,500-byte packets (~50 Mbit/s) starting cold without prior baseline, remaining below volumetric ceilings and EWMA thresholds.
 3. `benign_lan_noise`: Broadcast and multicast discovery traffic (DNS, NTP, mDNS, SSDP) that must not trigger scan or flood alerts.
 4. `benign_many_tabs_browsing`: An IPv4 client and an IPv6 client (NAT64 destinations) each opening 14 completed HTTPS connections to different servers on port 443 within about 7 s. More than 10 hosts in 10 s, but every handshake completes, so it must not alert.
-5. `fast_vertical_scan`: Single attacker probing 30 distinct destination ports in randomized order within 3 seconds (exceeding the 10-port `PORT_SCAN_THRESHOLD` within the 10 s `PORT_SCAN_TIME_WINDOW`).
-6. `horizontal_sweep`: Single attacker probing port 445 (SMB) across 20 distinct targets within 2 seconds (exceeding 10 hosts in 10 s `PORT_SCAN_TIME_WINDOW`).
-7. `slow_scan`: Stealthy vertical port scan (25 ports spaced 5 seconds apart over 120 seconds) bypassing the 10 s vertical window (`PORT_SCAN_TIME_WINDOW`) and caught by the slow scan detector (`SLOW_SCAN_TIME_WINDOW` = 300 s).
-8. `syn_flood_spoofed`: 600 client SYN packets targeting port 80 at 200 pps with spoofed source IPs and zero handshake completions.
-9. `udp_flood_inbound`: Distributed inbound UDP burst (6,000 packets across 1,000 distinct source IPs in 1 second) exceeding the volumetric ceiling.
-10. `mixed`: 10-minute continuous background timeline interleaving legitimate network noise with all 5 attack vectors at designated intervals.
+5. `benign_slow_browsing_ipv6`: 12 minutes of browsing from an IPv6 laptop, a new site every 3 s (240 distinct servers on 443), each raced over IPv6 and IPv4; 30% of the IPv6 paths are dead and never answer. More than 20 distinct hosts fail in every 300 s window, but 70% of attempts complete. Must not raise `SLOW_HORIZONTAL`.
+6. `benign_background_apps`: 12 minutes of background applications (sync, telemetry, update checks) reaching a new server every 2.5 s (288 distinct hosts, IPv4 and IPv6) plus fixed beacons; one attempt in four is abandoned (no answer, or a late SYN-ACK that the client resets). Must not alert.
+7. `fast_vertical_scan`: Single attacker probing 30 distinct destination ports in randomized order within 3 seconds (exceeding the 10-port `PORT_SCAN_THRESHOLD` within the 10 s `PORT_SCAN_TIME_WINDOW`).
+8. `horizontal_sweep`: Single attacker probing port 445 (SMB) across 20 distinct targets within 2 seconds (exceeding 10 hosts in 10 s `PORT_SCAN_TIME_WINDOW`).
+9. `slow_scan`: Stealthy vertical port scan (25 ports spaced 5 seconds apart over 120 seconds) bypassing the 10 s vertical window (`PORT_SCAN_TIME_WINDOW`) and caught by the slow scan detector (`SLOW_SCAN_TIME_WINDOW` = 300 s).
+10. `slow_horizontal_scan`: One source probes SSH (port 22) on 24 hosts, one every 5 s over 120 s: most silent, some RST, two half-open (SYN-ACK then the scanner resets). No handshake completes, so the slow detector must still alert once.
+11. `syn_flood_spoofed`: 600 client SYN packets targeting port 80 at 200 pps with spoofed source IPs and zero handshake completions.
+12. `udp_flood_inbound`: Distributed inbound UDP burst (6,000 packets across 1,000 distinct source IPs in 1 second) exceeding the volumetric ceiling.
+13. `mixed`: 10-minute continuous background timeline interleaving legitimate network noise with all 5 attack vectors at designated intervals.
 
 ---
 

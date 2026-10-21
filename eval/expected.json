@@ -3,6 +3,8 @@
   "benign_bulk_download": [],
   "benign_lan_noise": [],
   "benign_many_tabs_browsing": [],
+  "benign_slow_browsing_ipv6": [],
+  "benign_background_apps": [],
   "fast_vertical_scan": [
     {
       "threat_type": "PORT_SCAN",
@@ -18,6 +20,13 @@
     }
   ],
   "slow_scan": [
+    {
+      "threat_type": "PORT_SCAN",
+      "scan_type": "SLOW",
+      "count": 1
+    }
+  ],
+  "slow_horizontal_scan": [
     {
       "threat_type": "PORT_SCAN",
       "scan_type": "SLOW",

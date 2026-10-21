@@ -140,3 +140,15 @@ count alone. A browser completes the handshake; a scanner mostly does not.
 
 **Cost.** A SYN counts until its ACK arrives, so 10 or more connections to different hosts opened within one round trip can still alert before they complete. A `connect()` scan of open ports completes handshakes and
 is not counted for those ports; closed ports (RST) still count. If the capture never sees the client's ACKs (a one-way mirror of the server side), nothing is treated as completed and browsing alerts as before.
+
+### Slow horizontal scans also need failures to dominate (added after a live false positive)
+
+Counting 20 incomplete hosts in 300 s is not enough on its own. A live laptop produced `SLOW_HORIZONTAL` about once a minute from ordinary browsing: pages and apps reach hundreds of distinct servers on 443 in five
+minutes, and a steady fraction of attempts never completes (an IPv6 path that never answers while the IPv4 one wins a happy-eyeballs race, abandoned connections, a late SYN-ACK to a client that gave up). More than 20
+failed hosts per window is normal there. The scenarios `benign_slow_browsing_ipv6` and `benign_background_apps` reproduce it and failed with 9 alerts each before the change.
+
+**Decision.** The slow horizontal detector also keeps the hosts it has tried (`seen`, the 60 most recent) next to the incomplete ones (`targets`), and alerts only when the incomplete share is at least
+`SENTINELX_SLOW_SCAN_MIN_FAILURE_RATIO` (default 0.8). Browsing fails a minority of its attempts; a scan fails nearly all of them. Port 443 and private or own addresses are not exempted.
+
+**Cost.** An attacker who also completes real connections to the same port (three per probe in the test) pushes failures under 80% and hides in the noise; lowering the ratio trades that for more false alerts. The
+fast horizontal and vertical detectors are unchanged (a ratio would hide the "scan from a browsing host" case in a 10 s window). The slow vertical detector is unchanged: browsing does not probe many ports of one host.

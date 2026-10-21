@@ -64,6 +64,7 @@ the rest come from commit titles and test docstrings.
 ### After 2.0.0
 
 - **Scan detectors** count a destination only when its handshake did not complete (unanswered, RST-answered or half-open); ordinary browsing to many servers no longer raises `PORT_SCAN` (`detection/handshakes.py`, DESIGN section 10).
+- **Slow horizontal scan false positives:** browsing and background apps raised `SLOW_HORIZONTAL` about once a minute (20 failed hosts in 300 s is normal there). The detector now also requires at least 80% of its recent attempts to the port to have failed (`SENTINELX_SLOW_SCAN_MIN_FAILURE_RATIO`). New scenarios: `benign_slow_browsing_ipv6`, `benign_background_apps`, `slow_horizontal_scan`. Trade-off: a scan diluted with enough completed connections to the same port is not detected.
 - **Breaking API change:** `GET /api/v1/metrics` is now `GET /api/v1/sensor/status` and `GET /api/v1/metrics/history` is now `GET /api/v1/sensor/history` (no alias). Ad blockers block URLs containing "metrics", which blanked the Overview and Sensor health pages.
 - The Overview and Sensor health pages now show "Could not load sensor status ..." when a request fails, instead of staying blank.
 

@@ -65,6 +65,7 @@ MEANING = {
     "SENTINELX_SLOW_SCAN_THRESHOLD": "Distinct ports (or targets) in the slow window that raises a slow scan alert.",
     "SENTINELX_SLOW_SCAN_WINDOW": "Seconds of event time for slow scans.",
     "SENTINELX_SLOW_SCAN_COOLDOWN": "Seconds before the same slow scan alerts again.",
+    "SENTINELX_SLOW_SCAN_MIN_FAILURE_RATIO": "Slow horizontal scan only: share of the source's recent connection attempts to the port that must have failed to complete. Ordinary browsing fails a minority of attempts; a scan fails nearly all.",
     "SENTINELX_SYN_FLOOD_THRESHOLD": "SYNs per second to one (target, port) that can raise a SYN flood alert.",
     "SENTINELX_SYN_FLOOD_WINDOW": "Seconds of event time over which the SYN rate is measured.",
     "SENTINELX_SYN_FLOOD_COMPLETION_RATIO": "Handshake completion ratio (ACKs/SYNs) below which a high SYN rate counts as a flood.",

@@ -17,9 +17,12 @@ SCENARIO_NAMES = [
     "benign_bulk_download",
     "benign_lan_noise",
     "benign_many_tabs_browsing",
+    "benign_slow_browsing_ipv6",
+    "benign_background_apps",
     "fast_vertical_scan",
     "horizontal_sweep",
     "slow_scan",
+    "slow_horizontal_scan",
     "syn_flood_spoofed",
     "udp_flood_inbound",
     "mixed",
@@ -376,6 +379,50 @@ def generate_slow_scan(
     return packets, labels, meta
 
 
+def generate_slow_horizontal_scan(
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
+) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
+    """
+    Stealthy slow horizontal sweep: one source probes SSH (port 22) on 24 hosts, one every 5 s (120 s), below the
+    10-host/10 s fast window. Most hosts are silent, some answer RST (closed), two are open and answer SYN-ACK to
+    a half-open probe that the scanner resets. No handshake completes. The slow detector must still catch it
+    after it started requiring failures to dominate the attempts.
+    Expected alerts: 1 PORT_SCAN (SLOW).
+    """
+    rng = random.Random(seed)
+    packets: list[Any] = []
+    attacker = "198.51.100.51"
+    hosts = [f"192.168.2.{i}" for i in range(1, 25)]
+    rng.shuffle(hosts)
+
+    curr_ts = base_ts
+    start_ts = curr_ts
+    for i, host in enumerate(hosts):
+        sport = rng.randint(40000, 60000)
+        packets.append(_build_tcp_packet(attacker, host, sport, 22, "S", curr_ts))
+        if i % 5 == 1:  # closed port: RST/ACK
+            packets.append(_build_tcp_packet(host, attacker, 22, sport, "RA", curr_ts + 0.02, ack=1001))
+        elif i % 15 == 2:  # open port: SYN-ACK, then the scanner resets instead of completing
+            packets.append(_build_tcp_packet(host, attacker, 22, sport, "SA", curr_ts + 0.02, ack=1001))
+            packets.append(_build_tcp_packet(attacker, host, sport, 22, "R", curr_ts + 0.04, seq=1001))
+        curr_ts += 5.0
+    end_ts = curr_ts
+
+    labels = [
+        {
+            "attack_type": "PORT_SCAN",
+            "scan_type": "SLOW",
+            "attacker_ips": [attacker],
+            "victim_ip": None,
+            "victim_port": 22,
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+        }
+    ]
+    meta = {"duration_seconds": end_ts - base_ts, "benign_duration_seconds": 0.0}
+    return packets, labels, meta
+
+
 def generate_syn_flood_spoofed(
     seed: int = 42, base_ts: float = DEFAULT_BASE_TS
 ) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
@@ -539,14 +586,115 @@ def generate_mixed(
     return all_packets, labels, meta
 
 
+CLIENT_V6 = "2409:40f4:2013:6428:5189:4555:6426:7405"
+CLIENT_V4 = "192.168.1.20"
+
+
+def _v6_host(i: int) -> str:
+    return f"2606:4700:{i // 256:x}:{i % 256:x}::443"
+
+
+def _v4_host(i: int) -> str:
+    return f"104.{16 + i // 250}.{i % 250 + 1}.{(i * 7) % 250 + 1}"
+
+
+def _connect_ok(build: Any, client: str, srv: str, sport: int, ts: float, packets: list[Any]) -> None:
+    """A browser connection that completes: SYN, SYN-ACK, ACK, one request/response."""
+    packets.append(build(client, srv, sport, 443, "S", ts))
+    packets.append(build(srv, client, 443, sport, "SA", ts + 0.04, ack=1001))
+    packets.append(build(client, srv, sport, 443, "A", ts + 0.08, seq=1001, ack=2001))
+    packets.append(build(client, srv, sport, 443, "PA", ts + 0.12, b"\x16\x03\x01" + b"X" * 120, 1001, 2001))
+    packets.append(build(srv, client, 443, sport, "PA", ts + 0.2, b"\x16\x03\x03" + b"Y" * 300, 2001, 1121))
+
+
+def _connect_unanswered(build: Any, client: str, srv: str, sport: int, ts: float, packets: list[Any]) -> None:
+    """A path that never answers (blackholed IPv6 prefix, losing happy-eyeballs address): SYN plus two retransmits."""
+    for delay in (0.0, 1.0, 3.0):
+        packets.append(build(client, srv, sport, 443, "S", ts + delay, seq=1000))
+
+
+def _connect_reset(build: Any, client: str, srv: str, sport: int, ts: float, packets: list[Any]) -> None:
+    """Server answers SYN-ACK late; the application already gave up, so the client resets."""
+    packets.append(build(client, srv, sport, 443, "S", ts))
+    packets.append(build(srv, client, 443, sport, "SA", ts + 0.3, ack=1001))
+    packets.append(build(client, srv, sport, 443, "R", ts + 0.31, seq=1001))
+
+
+def generate_benign_slow_browsing_ipv6(
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
+) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
+    """
+    12 minutes of ordinary browsing from an IPv6 laptop (YouTube, Instagram-style sites with many CDN hosts):
+    a new site every 3 s, 240 distinct servers on port 443 in all. Every site is raced over IPv6 and IPv4 (happy
+    eyeballs); for 30% of the sites the IPv6 path is dead, so that address never answers and the IPv4 one wins.
+    Well over 20 distinct unanswered hosts fall inside every 300 s window, yet 70%+ of the attempts complete.
+    Expected alerts: 0.
+    """
+    rng = random.Random(seed)
+    packets: list[Any] = []
+    for i in range(240):
+        ts = base_ts + i * 3.0
+        sport = rng.randint(40000, 60000)
+        v6, v4 = _v6_host(i), _v4_host(i)
+        if i % 10 in (1, 4, 8):  # 30%: v6 blackholed, v4 wins the race
+            _connect_unanswered(_build_tcp6_packet, CLIENT_V6, v6, sport, ts, packets)
+            _connect_ok(_build_tcp_packet, CLIENT_V4, v4, sport + 1, ts + 0.25, packets)
+        else:
+            _connect_ok(_build_tcp6_packet, CLIENT_V6, v6, sport, ts, packets)
+    packets.sort(key=lambda p: float(p.time))
+    duration = 240 * 3.0
+    return packets, [], {"duration_seconds": duration, "benign_duration_seconds": duration}
+
+
+def generate_benign_background_apps(
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
+) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
+    """
+    12 minutes of background applications on a dual-stack laptop: sync clients, ad and telemetry endpoints and
+    update checks reaching a new server on 443 every 2.5 s (288 distinct hosts, IPv4 and IPv6 mixed), plus six
+    fixed telemetry beacons every 30 s. One attempt in four is abandoned (no answer, or an application that gave
+    up so the client resets a late SYN-ACK). More than 20 distinct hosts fail in every 300 s window; 75% succeed.
+    Expected alerts: 0.
+    """
+    rng = random.Random(seed)
+    packets: list[Any] = []
+    for i in range(288):
+        ts = base_ts + i * 2.5
+        sport = rng.randint(40000, 60000)
+        use_v6 = i % 2 == 0
+        build = _build_tcp6_packet if use_v6 else _build_tcp_packet
+        client = CLIENT_V6 if use_v6 else CLIENT_V4
+        srv = _v6_host(1000 + i) if use_v6 else _v4_host(1000 + i)
+        if i % 4 == 3:
+            (_connect_unanswered if i % 8 == 3 else _connect_reset)(build, client, srv, sport, ts, packets)
+        else:
+            _connect_ok(build, client, srv, sport, ts, packets)
+    for beat in range(24):
+        for b in range(6):
+            _connect_ok(
+                _build_tcp_packet,
+                CLIENT_V4,
+                f"198.51.100.{10 + b}",
+                rng.randint(40000, 60000),
+                base_ts + beat * 30.0 + b * 0.4,
+                packets,
+            )
+    packets.sort(key=lambda p: float(p.time))
+    duration = 288 * 2.5
+    return packets, [], {"duration_seconds": duration, "benign_duration_seconds": duration}
+
+
 GENERATORS = {
     "benign_web_browsing": generate_benign_web_browsing,
     "benign_bulk_download": generate_benign_bulk_download,
     "benign_lan_noise": generate_benign_lan_noise,
     "benign_many_tabs_browsing": generate_benign_many_tabs_browsing,
+    "benign_slow_browsing_ipv6": generate_benign_slow_browsing_ipv6,
+    "benign_background_apps": generate_benign_background_apps,
     "fast_vertical_scan": generate_fast_vertical_scan,
     "horizontal_sweep": generate_horizontal_sweep,
     "slow_scan": generate_slow_scan,
+    "slow_horizontal_scan": generate_slow_horizontal_scan,
     "syn_flood_spoofed": generate_syn_flood_spoofed,
     "udp_flood_inbound": generate_udp_flood_inbound,
     "mixed": generate_mixed,

@@ -11,6 +11,7 @@ from config.settings import (
     SCAN_TYPE_SLOW_HORIZONTAL,
     SCAN_TYPE_SLOW_VERTICAL,
     SLOW_SCAN_ALERT_COOLDOWN,
+    SLOW_SCAN_MIN_FAILURE_RATIO,
     SLOW_SCAN_THRESHOLD,
     SLOW_SCAN_TIME_WINDOW,
     THREAT_TYPE_PORT_SCAN,
@@ -21,6 +22,14 @@ from detection.handshakes import HandshakeTracker
 from detection.scoring import calculate_confidence, calculate_severity
 from detection.state_store import PartitionedStateStore
 from detection.utils import is_multicast_or_broadcast
+
+
+def _touch(table: dict[str, float], key: str, ts: float, cap: int) -> None:
+    """Record key as the most recent entry; drop the oldest while over the cap (dicts keep insertion order)."""
+    table.pop(key, None)
+    table[key] = ts
+    while len(table) > cap:
+        del table[next(iter(table))]
 
 
 class SlowScanDetector(BaseDetector):
@@ -38,6 +47,9 @@ class SlowScanDetector(BaseDetector):
         self.threshold = int(self.config.get("SLOW_SCAN_THRESHOLD", SLOW_SCAN_THRESHOLD))
         self.window = float(self.config.get("SLOW_SCAN_TIME_WINDOW", SLOW_SCAN_TIME_WINDOW))
         self.cooldown = float(self.config.get("SLOW_SCAN_ALERT_COOLDOWN", SLOW_SCAN_ALERT_COOLDOWN))
+        self.min_failure_ratio = float(self.config.get("SLOW_SCAN_MIN_FAILURE_RATIO", SLOW_SCAN_MIN_FAILURE_RATIO))
+        # Recent targets remembered per (source, port); the oldest are dropped first so the ratio stays current.
+        self.recent_cap = self.threshold * 3
 
     def observe(self, event: dict[str, Any], engine_clock: float) -> list[Alert]:
         source_ip = event.get("source_ip")
@@ -134,27 +146,31 @@ class SlowScanDetector(BaseDetector):
         h_entry = self.store.get(h_key)
 
         if h_entry is None:
-            h_targets = {destination_ip: event_time}
+            h_targets: dict[str, float] = {}
+            h_seen: dict[str, float] = {}
             h_first_seen = event_time
         else:
+            # h_seen: every host tried in the window. h_targets: those whose handshake did NOT complete.
+            h_seen = {ip: ts for ip, ts in h_entry["seen"].items() if ts >= cutoff}
             h_targets = {
                 ip: ts
                 for ip, ts in h_entry["targets"].items()
                 if ts >= cutoff and not self.handshakes.completed(source_ip, ip, destination_port, ts)
             }
             h_first_seen = h_entry.get("first_seen", event_time)
-            if destination_ip in h_targets:
-                h_targets[destination_ip] = event_time
-            elif len(h_targets) < (self.threshold + 1):
-                h_targets[destination_ip] = event_time
+        _touch(h_seen, destination_ip, event_time, self.recent_cap)
+        _touch(h_targets, destination_ip, event_time, self.recent_cap)
 
         self.store.put(
             h_key,
-            {"targets": h_targets, "first_seen": h_first_seen, "last_seen": event_time},
+            {"targets": h_targets, "seen": h_seen, "first_seen": h_first_seen, "last_seen": event_time},
         )
 
         h_target_count = len(h_targets)
-        if h_target_count >= self.threshold:
+        # A scan fails (almost) every attempt; browsing and background apps complete most and abandon a few.
+        # Counting failures alone cannot tell them apart over 300 s, so also require them to dominate the attempts.
+        failure_ratio = h_target_count / max(1, len(h_seen))
+        if h_target_count >= self.threshold and failure_ratio >= self.min_failure_ratio:
             cooldown_key = ("SLOW_HORIZONTAL", source_ip, destination_port)
             is_fast_active = self.is_in_cooldown(
                 ("HORIZONTAL", source_ip, destination_port), event_time, 60.0
@@ -163,13 +179,15 @@ class SlowScanDetector(BaseDetector):
                 self.record_cooldown(cooldown_key, event_time)
                 self.record_cooldown(("SLOW_HORIZONTAL", source_ip), event_time)
 
-                target_sample = sorted(list(h_targets.keys()))[:10]
+                target_sample = sorted(h_targets.keys())[:10]
                 severity = calculate_severity(h_target_count, self.threshold)
                 confidence = calculate_confidence(h_target_count, self.threshold)
 
                 evidence = {
                     "scan_type": SCAN_TYPE_SLOW_HORIZONTAL,
                     "unique_targets_observed": h_target_count,
+                    "hosts_tried": len(h_seen),
+                    "failure_ratio": round(failure_ratio, 3),
                     "threshold": self.threshold,
                     "window_seconds": self.window,
                     "target_port": destination_port,
@@ -192,7 +210,8 @@ class SlowScanDetector(BaseDetector):
                         evidence=evidence,
                         message=(
                             f"Slow Horizontal TCP port scan detected from {source_ip} "
-                            f"targeting port {destination_port} across {h_target_count} hosts in {self.window:.0f}s"
+                            f"targeting port {destination_port} across {h_target_count} hosts in {self.window:.0f}s "
+                            f"({failure_ratio:.0%} of {len(h_seen)} attempts did not complete)"
                         ),
                     )
                 )

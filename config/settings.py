@@ -52,6 +52,7 @@ PORT_SCAN_ALERT_COOLDOWN = float(os.getenv("SENTINELX_PORT_SCAN_COOLDOWN", "30.0
 SLOW_SCAN_THRESHOLD = int(os.getenv("SENTINELX_SLOW_SCAN_THRESHOLD", "20"))
 SLOW_SCAN_TIME_WINDOW = float(os.getenv("SENTINELX_SLOW_SCAN_WINDOW", "300.0"))
 SLOW_SCAN_ALERT_COOLDOWN = float(os.getenv("SENTINELX_SLOW_SCAN_COOLDOWN", "60.0"))
+SLOW_SCAN_MIN_FAILURE_RATIO = float(os.getenv("SENTINELX_SLOW_SCAN_MIN_FAILURE_RATIO", "0.8"))
 
 # SYN flood detection
 SYN_FLOOD_THRESHOLD = int(os.getenv("SENTINELX_SYN_FLOOD_THRESHOLD", "100"))  # SYN packets per second
@@ -248,6 +249,10 @@ def validate_config(config_dict: dict[str, Any] | None = None) -> None:
     mode = cfg.get("WEBHOOK_MODE")
     if mode is not None and mode not in ("generic", "slack", "discord"):
         raise ValueError(f"WEBHOOK_MODE must be generic, slack or discord, got: {mode}")
+
+    failure_ratio = cfg.get("SLOW_SCAN_MIN_FAILURE_RATIO")
+    if failure_ratio is not None and (not isinstance(failure_ratio, (int, float)) or not (0.0 < failure_ratio <= 1.0)):
+        raise ValueError(f"SLOW_SCAN_MIN_FAILURE_RATIO must be in (0.0, 1.0], got: {failure_ratio}")
 
     alpha = cfg.get("VOLUMETRIC_EWMA_ALPHA")
     if alpha is not None and (not isinstance(alpha, (int, float)) or not (0.0 < alpha <= 1.0)):
