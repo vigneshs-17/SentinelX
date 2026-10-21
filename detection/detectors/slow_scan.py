@@ -17,6 +17,7 @@ from config.settings import (
 )
 from detection.alert import Alert
 from detection.detectors.base import BaseDetector
+from detection.handshakes import HandshakeTracker
 from detection.scoring import calculate_confidence, calculate_severity
 from detection.state_store import PartitionedStateStore
 from detection.utils import is_multicast_or_broadcast
@@ -33,6 +34,7 @@ class SlowScanDetector(BaseDetector):
     def __init__(self, config: dict[str, Any], state_store: PartitionedStateStore):
         super().__init__(config, state_store)
         self.store = state_store.get_partition("slow_scan")
+        self.handshakes = HandshakeTracker(state_store)
         self.threshold = int(self.config.get("SLOW_SCAN_THRESHOLD", SLOW_SCAN_THRESHOLD))
         self.window = float(self.config.get("SLOW_SCAN_TIME_WINDOW", SLOW_SCAN_TIME_WINDOW))
         self.cooldown = float(self.config.get("SLOW_SCAN_ALERT_COOLDOWN", SLOW_SCAN_ALERT_COOLDOWN))
@@ -65,7 +67,11 @@ class SlowScanDetector(BaseDetector):
             v_ports = {destination_port: event_time}
             v_first_seen = event_time
         else:
-            v_ports = {p: ts for p, ts in v_entry["ports"].items() if ts >= cutoff}
+            v_ports = {
+                p: ts
+                for p, ts in v_entry["ports"].items()
+                if ts >= cutoff and not self.handshakes.completed(source_ip, destination_ip, p, ts)
+            }
             v_first_seen = v_entry.get("first_seen", event_time)
             if destination_port in v_ports:
                 v_ports[destination_port] = event_time
@@ -131,7 +137,11 @@ class SlowScanDetector(BaseDetector):
             h_targets = {destination_ip: event_time}
             h_first_seen = event_time
         else:
-            h_targets = {ip: ts for ip, ts in h_entry["targets"].items() if ts >= cutoff}
+            h_targets = {
+                ip: ts
+                for ip, ts in h_entry["targets"].items()
+                if ts >= cutoff and not self.handshakes.completed(source_ip, ip, destination_port, ts)
+            }
             h_first_seen = h_entry.get("first_seen", event_time)
             if destination_ip in h_targets:
                 h_targets[destination_ip] = event_time

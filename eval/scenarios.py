@@ -10,12 +10,13 @@ import random
 from pathlib import Path
 from typing import Any
 
-from scapy.all import IP, TCP, UDP, Raw, wrpcap
+from scapy.all import IP, TCP, UDP, IPv6, Raw, wrpcap
 
 SCENARIO_NAMES = [
     "benign_web_browsing",
     "benign_bulk_download",
     "benign_lan_noise",
+    "benign_many_tabs_browsing",
     "fast_vertical_scan",
     "horizontal_sweep",
     "slow_scan",
@@ -41,6 +42,27 @@ def _build_tcp_packet(
     """Builds a deterministic TCP packet with exact field definitions."""
     pkt = (
         IP(src=src_ip, dst=dst_ip, id=0, ttl=64, chksum=0)
+        / TCP(sport=sport, dport=dport, flags=flags, seq=seq, ack=ack, window=8192, chksum=0)
+        / Raw(load=payload)
+    )
+    pkt.time = float(ts)
+    return pkt
+
+
+def _build_tcp6_packet(
+    src_ip: str,
+    dst_ip: str,
+    sport: int,
+    dport: int,
+    flags: str,
+    ts: float,
+    payload: bytes = b"",
+    seq: int = 1000,
+    ack: int = 0,
+) -> Any:
+    """IPv6 twin of _build_tcp_packet."""
+    pkt = (
+        IPv6(src=src_ip, dst=dst_ip, hlim=64)
         / TCP(sport=sport, dport=dport, flags=flags, seq=seq, ack=ack, window=8192, chksum=0)
         / Raw(load=payload)
     )
@@ -118,6 +140,42 @@ def generate_benign_web_browsing(
     duration = curr_ts - base_ts
     meta = {"duration_seconds": duration, "benign_duration_seconds": duration}
     return packets, [], meta
+
+
+def generate_benign_many_tabs_browsing(
+    seed: int = 42, base_ts: float = DEFAULT_BASE_TS
+) -> tuple[list[Any], list[dict[str, Any]], dict[str, float]]:
+    """
+    Many browser tabs: one IPv4 client and one IPv6 client (NAT64 destinations, as seen on a real capture) each open
+    HTTPS connections to 14 different servers on port 443 within about 7 s. Every connection completes the three-way
+    handshake, so this is not a scan even though it exceeds the 10-host horizontal threshold.
+    Expected alerts: 0.
+    """
+    rng = random.Random(seed)
+    packets: list[Any] = []
+    flows = [
+        (_build_tcp_packet, "192.168.1.20", [f"203.0.113.{i}" for i in range(10, 24)]),
+        (
+            _build_tcp6_packet,
+            "2409:40f4:2013:6428:5189:4555:6426:7405",
+            [f"64:ff9b::2d1f:{i:x}" for i in range(0x8D00, 0x8D0E)],
+        ),
+    ]
+    end_ts = base_ts
+    for build, client, servers in flows:
+        curr_ts = base_ts + (0.25 if build is _build_tcp6_packet else 0.0)
+        for srv in servers:
+            sport = rng.randint(40000, 60000)
+            packets.append(build(client, srv, sport, 443, "S", curr_ts))
+            packets.append(build(srv, client, 443, sport, "SA", curr_ts + 0.03, ack=1001))
+            packets.append(build(client, srv, sport, 443, "A", curr_ts + 0.06, seq=1001, ack=2001))
+            packets.append(build(client, srv, sport, 443, "PA", curr_ts + 0.1, b"" + b"X" * 150, 1001, 2001))
+            packets.append(build(srv, client, 443, sport, "PA", curr_ts + 0.15, b"" + b"Y" * 600, 2001, 1151))
+            curr_ts += 0.5
+        end_ts = max(end_ts, curr_ts)
+    packets.sort(key=lambda p: float(p.time))
+    duration = end_ts - base_ts
+    return packets, [], {"duration_seconds": duration, "benign_duration_seconds": duration}
 
 
 def generate_benign_bulk_download(
@@ -485,6 +543,7 @@ GENERATORS = {
     "benign_web_browsing": generate_benign_web_browsing,
     "benign_bulk_download": generate_benign_bulk_download,
     "benign_lan_noise": generate_benign_lan_noise,
+    "benign_many_tabs_browsing": generate_benign_many_tabs_browsing,
     "fast_vertical_scan": generate_fast_vertical_scan,
     "horizontal_sweep": generate_horizontal_sweep,
     "slow_scan": generate_slow_scan,

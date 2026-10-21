@@ -18,6 +18,7 @@ from config.settings import (
 )
 from detection.alert import Alert
 from detection.detectors.base import BaseDetector
+from detection.handshakes import HandshakeTracker
 from detection.scoring import calculate_confidence, calculate_severity
 from detection.state_store import PartitionedStateStore
 from detection.utils import is_multicast_or_broadcast
@@ -34,6 +35,7 @@ class VerticalPortScanDetector(BaseDetector):
     def __init__(self, config: dict[str, Any], state_store: PartitionedStateStore):
         super().__init__(config, state_store)
         self.store = state_store.get_partition("vertical")
+        self.handshakes = HandshakeTracker(state_store)
         self.threshold = int(self.config.get("VERTICAL_SCAN_THRESHOLD", VERTICAL_SCAN_THRESHOLD))
         self.window = float(self.config.get("PORT_SCAN_TIME_WINDOW", PORT_SCAN_TIME_WINDOW))
         self.cooldown = float(self.config.get("PORT_SCAN_ALERT_COOLDOWN", PORT_SCAN_ALERT_COOLDOWN))
@@ -62,7 +64,12 @@ class VerticalPortScanDetector(BaseDetector):
             ports: dict[int, float] = {destination_port: event_time}
             first_seen = event_time
         else:
-            ports = {p: ts for p, ts in entry["ports"].items() if ts >= cutoff}
+            # Ports whose handshake completed are normal connections, not probes.
+            ports = {
+                p: ts
+                for p, ts in entry["ports"].items()
+                if ts >= cutoff and not self.handshakes.completed(source_ip, destination_ip, p, ts)
+            }
             first_seen = entry.get("first_seen", event_time)
             if destination_port in ports:
                 ports[destination_port] = event_time
@@ -131,6 +138,7 @@ class HorizontalPortScanDetector(BaseDetector):
     def __init__(self, config: dict[str, Any], state_store: PartitionedStateStore):
         super().__init__(config, state_store)
         self.store = state_store.get_partition("horizontal")
+        self.handshakes = HandshakeTracker(state_store)
         self.threshold = int(self.config.get("HORIZONTAL_SCAN_THRESHOLD", HORIZONTAL_SCAN_THRESHOLD))
         self.window = float(self.config.get("PORT_SCAN_TIME_WINDOW", PORT_SCAN_TIME_WINDOW))
         self.cooldown = float(self.config.get("PORT_SCAN_ALERT_COOLDOWN", PORT_SCAN_ALERT_COOLDOWN))
@@ -158,7 +166,12 @@ class HorizontalPortScanDetector(BaseDetector):
             targets: dict[str, float] = {destination_ip: event_time}
             first_seen = event_time
         else:
-            targets = {ip: ts for ip, ts in entry["targets"].items() if ts >= cutoff}
+            # Hosts whose handshake completed are normal connections (browsing), not probes.
+            targets = {
+                ip: ts
+                for ip, ts in entry["targets"].items()
+                if ts >= cutoff and not self.handshakes.completed(source_ip, ip, destination_port, ts)
+            }
             first_seen = entry.get("first_seen", event_time)
             if destination_ip in targets:
                 targets[destination_ip] = event_time

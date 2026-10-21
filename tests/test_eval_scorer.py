@@ -55,11 +55,12 @@ def test_scenario_generation_deterministic_byte_identity():
 
 
 def test_all_scenario_names_registered():
-    """Verify all 9 mandatory benchmark scenarios are defined and callable."""
+    """Verify all 10 mandatory benchmark scenarios are defined and callable."""
     expected_scenarios = [
         "benign_web_browsing",
         "benign_bulk_download",
         "benign_lan_noise",
+        "benign_many_tabs_browsing",
         "fast_vertical_scan",
         "horizontal_sweep",
         "slow_scan",

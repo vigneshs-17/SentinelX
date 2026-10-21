@@ -144,6 +144,8 @@ class PartitionedStateStore:
         from config.settings import (
             PARTITION_CAP_COOLDOWNS,
             PARTITION_CAP_HORIZONTAL,
+            PARTITION_CAP_SCAN_ATTEMPTS,
+            PARTITION_CAP_SCAN_COMPLETED,
             PARTITION_CAP_SLOW_SCAN,
             PARTITION_CAP_SYN_FLOOD_AGGREGATES,
             PARTITION_CAP_SYN_FLOOD_HALF_OPEN,
@@ -159,6 +161,8 @@ class PartitionedStateStore:
             "syn_flood_half_open": PARTITION_CAP_SYN_FLOOD_HALF_OPEN,
             "volumetric": PARTITION_CAP_VOLUMETRIC,
             "cooldowns": PARTITION_CAP_COOLDOWNS,
+            "scan_attempts": PARTITION_CAP_SCAN_ATTEMPTS,
+            "scan_completed": PARTITION_CAP_SCAN_COMPLETED,
         }
 
         caps = default_caps if partition_caps is None else {**default_caps, **partition_caps}

@@ -9,7 +9,7 @@ urllib3==2.8.0
 
 schemathesis==4.32.1
 anyio==4.15.1
-certifi==2026.7.22
+certifi==2026.10.19
 charset-normalizer==3.5.1
 graphql-core==3.3.0
 harfile==0.5.0

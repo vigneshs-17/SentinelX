@@ -2,6 +2,7 @@
   "benign_web_browsing": [],
   "benign_bulk_download": [],
   "benign_lan_noise": [],
+  "benign_many_tabs_browsing": [],
   "fast_vertical_scan": [
     {
       "threat_type": "PORT_SCAN",

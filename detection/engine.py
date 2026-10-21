@@ -19,6 +19,7 @@ from detection.detectors.port_scan import HorizontalPortScanDetector, VerticalPo
 from detection.detectors.slow_scan import SlowScanDetector
 from detection.detectors.syn_flood import SynFloodDetector
 from detection.detectors.volumetric import VolumetricAnomalyDetector
+from detection.handshakes import HandshakeTracker
 from detection.state_store import PartitionedStateStore
 
 
@@ -39,6 +40,8 @@ class DetectionEngine:
         self._lock = threading.RLock()
         self._last_cleanup_clock: float = 0.0
         self._cleanup_interval_seconds: float = 10.0
+
+        self.handshakes = HandshakeTracker(self.state_store)
 
         # Instantiate detectors
         self.detectors: list[BaseDetector] = [
@@ -62,6 +65,7 @@ class DetectionEngine:
                     self.clock = event_ts
 
             alerts: list[Alert] = []
+            self.handshakes.observe(packet_data)  # before the detectors, so scans see completed handshakes
             for detector in self.detectors:
                 detected = detector.observe(packet_data, self.clock)
                 if detected:
@@ -90,7 +94,15 @@ class DetectionEngine:
         )
 
         # Evict other state partitions with general TTL
-        for name in ["vertical", "horizontal", "slow_scan", "volumetric", "cooldowns"]:
+        for name in [
+            "vertical",
+            "horizontal",
+            "slow_scan",
+            "volumetric",
+            "cooldowns",
+            "scan_attempts",
+            "scan_completed",
+        ]:
             store = self.state_store.get_partition(name)
             evicted[name] = store.evict_expired(
                 current_clock - ttl,

@@ -99,6 +99,8 @@ MEANING = {
     "SENTINELX_SENSOR_ID": "Name this sensor writes into alerts and heartbeats.",
     "SENTINELX_STATS_INTERVAL": "Seconds between pipeline throughput log lines.",
     "SENTINELX_RETENTION_DAYS": "Alerts older than this are pruned daily by the sensor; 0 disables pruning.",
+    "SENTINELX_CAP_SCAN_ATTEMPTS": "Max connection attempts (SYNs) tracked so scan detectors can tell completed handshakes from unanswered or reset ones.",
+    "SENTINELX_CAP_SCAN_COMPLETED": "Max (source, destination, port) triples remembered as having completed a handshake.",
     "SENTINELX_AUDIT_RETENTION_DAYS": "Audit-log rows older than this are deleted only by the admin command `python main.py db prune-audit`; 0 keeps them forever.",
     "SENTINELX_RETENTION_INTERVAL": "Seconds between automatic prune runs.",
     "SENTINELX_STATUS_INTERVAL": "Seconds between sensor heartbeat rows.",

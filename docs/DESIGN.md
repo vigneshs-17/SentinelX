@@ -126,3 +126,17 @@ No framework or bundler: the console is about 90 KB of JS and CSS, needs no buil
 Live updates use Server-Sent Events (one direction, plain HTTP, works through proxies, capped at 8 streams per process because each holds a thread) with a polling
 fallback. Tables are paged on the server (50-500 rows) rather than virtualised in the browser, which keeps the DOM small and the filters, sorting and export
 consistent because they share one query builder.
+
+## 10. Scan detectors count only attempts that did not complete a handshake
+
+**Decision.** `detection/handshakes.py` records each SYN (`scan_attempts`) and, when the client's ACK follows, remembers that (source, destination, port) completed (`scan_completed`). The vertical,
+horizontal and slow-scan detectors drop completed destinations before comparing with their threshold. Unanswered SYNs, RST-answered SYNs and SYN-ACKs that the client never ACKs (a half-open SYN scan) still count.
+Both tables are capped partitions and use packet time only.
+
+**Why.** A live capture of normal browsing (many tabs, each connecting to a different server on port 443, IPv6 with NAT64 destinations) raised a `HORIZONTAL` alert: 10 hosts on one port in 10 s is what a sweep looks like by
+count alone. A browser completes the handshake; a scanner mostly does not.
+
+**Alternatives.** Wait for an outcome before counting (adds latency and misses a scan that ends inside the grace period). Whitelist port 443 (an attacker scans 443 too).
+
+**Cost.** A SYN counts until its ACK arrives, so 10 or more connections to different hosts opened within one round trip can still alert before they complete. A `connect()` scan of open ports completes handshakes and
+is not counted for those ports; closed ports (RST) still count. If the capture never sees the client's ACKs (a one-way mirror of the server side), nothing is treated as completed and browsing alerts as before.
