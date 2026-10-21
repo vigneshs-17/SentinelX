@@ -409,3 +409,39 @@ def test_unused_settings_are_gone_from_code_and_docs():
     for path in ("config/settings.py", "docs/OPERATIONS.md", "scripts/gen_config_docs.py"):
         text = (ROOT / path).read_text(encoding="utf-8")
         assert not any(re.search(rf"{name}", text) for name in gone), path
+
+
+def test_live_capture_callback_returns_none_so_scapy_prints_nothing_per_packet(monkeypatch):
+    """Scapy's sniff() prints the prn return value; enqueue() returns a bool, which printed "True" per packet."""
+    from capture import packet_capture
+
+    seen: dict[str, object] = {}
+
+    class FakePipeline:
+        maxsize = 1
+
+        def __init__(self):
+            self.enqueued = []
+
+        def enqueue(self, packet):
+            self.enqueued.append(packet)
+            return True
+
+        def start(self):
+            pass
+
+        def stop(self, drain=True):
+            pass
+
+        def get_snapshot(self):
+            return {}
+
+    def fake_sniff(**kwargs):
+        seen.update(kwargs)
+
+    pipe = FakePipeline()
+    monkeypatch.setattr(packet_capture, "sniff", fake_sniff)
+    packet_capture.start_capture(pipeline_instance=pipe)
+    callback = seen["prn"]
+    assert callback("pkt") is None
+    assert pipe.enqueued == ["pkt"]
