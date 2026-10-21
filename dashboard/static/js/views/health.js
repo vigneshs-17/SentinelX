@@ -1,7 +1,7 @@
 // Sensor health: current numbers, 30-minute sparklines, offline banner and a drop-rate warning.
 import { api, bus } from "../api.js";
 import { clear, h, svg } from "../dom.js";
-import { fmtNumber, fmtPercent, fmtTime } from "../util.js";
+import { fmtNumber, fmtPercent, fmtTime, loadFailure } from "../util.js";
 
 const REFRESH_MS = 10000;
 const SW = 320;
@@ -30,6 +30,7 @@ function sparkline(label, values, unit) {
 
 export function renderHealth(main) {
   const banners = h("div");
+  const loadError = h("p", { class: "banner", role: "alert", id: "load-error", hidden: true });
   const numbers = h("div", { class: "grid grid-kpi" });
   const charts = h("div", { class: "grid grid-2" });
   const meta = h("p", { class: "muted" });
@@ -54,8 +55,9 @@ export function renderHealth(main) {
 
   async function load() {
     try {
-      const [{ data: m }, { data: hist }] = await Promise.all([api.get("/api/v1/metrics"), api.get("/api/v1/metrics/history", { minutes: 30 })]);
+      const [{ data: m }, { data: hist }] = await Promise.all([api.get("/api/v1/sensor/status"), api.get("/api/v1/sensor/history", { minutes: 30 })]);
       if (disposed) return;
+      loadError.hidden = true;
       latest = m;
       paintNumbers(m);
       const pts = hist.points;
@@ -71,8 +73,10 @@ export function renderHealth(main) {
         banners.prepend(h("p", { class: "banner", role: "alert" }, `Drop rate ${fmtPercent(rate)} over the last ${hist.window_minutes} minutes is above the ${fmtPercent(hist.drop_warn_ratio)} threshold. The sensor cannot keep up; detections may be missed.`));
       }
       meta.textContent = `${pts.length} heartbeats in the last ${hist.window_minutes} minutes. Window drop rate: ${fmtPercent(rate)}.`;
-    } catch {
-      /* api.js reports 401/403/429 */
+    } catch (err) {
+      if (disposed || (err && err.status === 401)) return; // 401: api.js sends the user to the login screen
+      loadError.textContent = loadFailure("sensor status", err);
+      loadError.hidden = false;
     }
   }
 
@@ -84,7 +88,7 @@ export function renderHealth(main) {
   };
   bus.addEventListener("stream:metrics", onMetrics);
   const timer = setInterval(load, REFRESH_MS);
-  clear(main).append(h("div", { class: "page-head" }, h("h1", null, "Sensor health"), meta), banners, numbers, charts);
+  clear(main).append(h("div", { class: "page-head" }, h("h1", null, "Sensor health"), meta), loadError, banners, numbers, charts);
   load();
   return () => {
     disposed = true;

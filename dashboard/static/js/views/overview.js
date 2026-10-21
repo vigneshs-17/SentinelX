@@ -1,6 +1,6 @@
 import { api, bus } from "../api.js";
 import { clear, h, svg } from "../dom.js";
-import { fmtNumber, fmtPercent, go, hashFor, isoMinus } from "../util.js";
+import { fmtNumber, fmtPercent, go, hashFor, isoMinus, loadFailure } from "../util.js";
 
 const REFRESH_MS = 30000;
 const W = 800;
@@ -22,6 +22,7 @@ export function renderOverview(main, params) {
   const sourcesBox = h("div", { class: "panel" });
   const portsBox = h("div", { class: "panel" });
   const live = h("p", { class: "muted", id: "overview-meta" });
+  const loadError = h("p", { class: "banner", role: "alert", id: "load-error", hidden: true });
   let metrics = null;
   let latest = null;
   let disposed = false;
@@ -145,19 +146,26 @@ export function renderOverview(main, params) {
   }
 
   async function load() {
-    try {
-      const [{ data: overview }, { data: m }] = await Promise.all([api.get("/api/v1/overview", rangeParams), api.get("/api/v1/metrics")]);
-      if (disposed) return;
+    // Two independent requests: a blocked or failed sensor status must not blank the alert overview, or the reverse.
+    const [overviewResult, statusResult] = await Promise.allSettled([api.get("/api/v1/overview", rangeParams), api.get("/api/v1/sensor/status")]);
+    if (disposed) return;
+    const failures = [];
+    if (statusResult.status === "fulfilled") metrics = statusResult.value.data;
+    else failures.push(["sensor status", statusResult.reason]);
+    if (overviewResult.status === "fulfilled") {
+      const overview = overviewResult.value.data;
       latest = overview;
-      metrics = m;
-      renderTiles();
-      renderTimeline();
       bars(sourcesBox, "Top sources", overview.top_sources, "source_ip");
       bars(portsBox, "Top targeted ports", overview.top_ports, "dport");
       live.textContent = `${fmtNumber(overview.total)} alerts from ${new Date(overview.since).toLocaleString(undefined, { hour12: false })} to ${new Date(overview.until).toLocaleString(undefined, { hour12: false })}.`;
-    } catch {
-      /* api.js already toasts 403/429 and routes 401 to the login screen */
+    } else failures.push(["the alert overview", overviewResult.reason]);
+    if (latest) {
+      renderTiles();
+      renderTimeline();
     }
+    const shown = failures.filter(([, err]) => !(err && err.status === 401)); // 401: api.js sends the user to the login screen
+    loadError.textContent = shown.map(([what, err]) => loadFailure(what, err)).join(" ");
+    loadError.hidden = shown.length === 0;
   }
 
   const onMetrics = (e) => {
@@ -167,7 +175,7 @@ export function renderOverview(main, params) {
   bus.addEventListener("stream:metrics", onMetrics);
   const timer = setInterval(load, REFRESH_MS);
 
-  clear(main).append(h("div", { class: "page-head" }, h("h1", null, "Overview"), live), tiles, timelineBox, h("div", { class: "grid grid-2" }, sourcesBox, portsBox));
+  clear(main).append(h("div", { class: "page-head" }, h("h1", null, "Overview"), live), loadError, tiles, timelineBox, h("div", { class: "grid grid-2" }, sourcesBox, portsBox));
   load();
   return () => {
     disposed = true;

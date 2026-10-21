@@ -68,7 +68,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "429": {$ref: "#/components/responses/RateLimited"}
-  /api/v1/metrics:
+  /api/v1/sensor/status:
     get:
       tags: [operations]
       summary: Latest sensor heartbeat
@@ -134,7 +134,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "503": {$ref: "#/components/responses/Unavailable"}
-  /api/v1/metrics/history:
+  /api/v1/sensor/history:
     get:
       tags: [operations]
       summary: Sensor heartbeat history for sparklines

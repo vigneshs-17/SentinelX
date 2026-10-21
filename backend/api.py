@@ -345,7 +345,7 @@ def health_check():
 
 
 def sensor_metrics(connection: sqlite3.Connection) -> dict[str, Any]:
-    """Latest sensor heartbeat plus online flag; shared by /metrics and the SSE stream."""
+    """Latest sensor heartbeat plus online flag; shared by /sensor/status and the SSE stream."""
     status = fetch_latest_sensor_status(connection)
     if status is None:
         return {"sensor_online": False, "last_seen": None, "age_seconds": None, "sensor_id": None}
@@ -355,9 +355,9 @@ def sensor_metrics(connection: sqlite3.Connection) -> dict[str, Any]:
     return body
 
 
-@app.route("/api/v1/metrics", methods=["GET"])
+@app.route("/api/v1/sensor/status", methods=["GET"])
 @require("metrics:read")
-def get_metrics():
+def sensor_status_view():
     """Latest sensor heartbeat. sensor_online is false when it is older than SENSOR_OFFLINE_AFTER seconds."""
     err = reject_unknown_params(set())
     if err:
@@ -594,9 +594,9 @@ def get_graph():
     ), 200
 
 
-@app.route("/api/v1/metrics/history", methods=["GET"])
+@app.route("/api/v1/sensor/history", methods=["GET"])
 @require("metrics:read")
-def metrics_history():
+def sensor_history():
     """Sensor heartbeat history for sparklines, plus the configured drop-rate warning threshold."""
     minutes, err = _int_param("minutes", 30, 1, 180)
     if err or minutes is None:

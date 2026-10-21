@@ -331,7 +331,7 @@ def test_failures_counted_in_metrics_and_audit_log(users):
     assert auth.auth_metrics["login_failures"] == before + 2
     rows = [r for r in accounts.query_audit(action="login.failure")]
     assert len(rows) == 2 and rows[0]["target"] == "user:viewer-user" and rows[0]["source_ip"] == "198.51.100.9"
-    body = authed_client(app).get("/api/v1/metrics").get_json()
+    body = authed_client(app).get("/api/v1/sensor/status").get_json()
     assert body["api"]["login_failures"] >= before + 2
 
 
@@ -398,12 +398,12 @@ def test_unpoliced_view_is_denied_by_default():
 PROTECTED = [
     ("GET", "/api/v1/alerts", "viewer"),
     ("GET", "/api/v1/stats", "viewer"),
-    ("GET", "/api/v1/metrics", "viewer"),
+    ("GET", "/api/v1/sensor/status", "viewer"),
     ("GET", "/api/v1/session", "viewer"),
     ("GET", "/api/v1/stream", "viewer"),
     ("GET", "/api/v1/overview", "viewer"),
     ("GET", "/api/v1/graph", "viewer"),
-    ("GET", "/api/v1/metrics/history", "viewer"),
+    ("GET", "/api/v1/sensor/history", "viewer"),
     ("GET", "/api/v1/alerts/export", "viewer"),
     ("GET", "/api/v1/assignees", "analyst"),
     ("GET", "/api/v1/alerts/1/triage", "viewer"),

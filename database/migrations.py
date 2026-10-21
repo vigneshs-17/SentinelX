@@ -122,7 +122,7 @@ def migration_3(conn: sqlite3.Connection) -> None:
 def migration_4(conn: sqlite3.Connection) -> None:
     """
     Migration 4: sensor_status heartbeat history (one row per sensor per interval), written by the sensor
-    and read by the API for /api/v1/metrics and the health sparklines.
+    and read by the API for /api/v1/sensor/status and the health sparklines.
     """
     logger.info("Applying migration 4: sensor_status")
     conn.execute(

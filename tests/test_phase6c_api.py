@@ -75,7 +75,7 @@ def test_single_json_error_envelope(viewer):
 
 
 def test_unknown_query_parameters_are_rejected_on_every_route(viewer):
-    for url in ("/api/v1/alerts", "/api/v1/stats", "/api/v1/metrics", "/api/v1/session", "/api/v1/stream"):
+    for url in ("/api/v1/alerts", "/api/v1/stats", "/api/v1/sensor/status", "/api/v1/session", "/api/v1/stream"):
         resp = viewer.get(f"{url}?bogus=1")
         assert resp.status_code == 400 and "bogus" in resp.get_json()["message"], url
     assert app.test_client().get("/health?x=1").status_code == 400
@@ -109,7 +109,7 @@ def test_alert_filter_validation_and_cidr_filtering(viewer):
 
 def test_session_and_metrics_routes_validate_nothing_else(viewer):
     assert viewer.get("/api/v1/session").status_code == 200
-    assert viewer.get("/api/v1/metrics").status_code == 200
+    assert viewer.get("/api/v1/sensor/status").status_code == 200
 
 
 # ------------------------------------------------------------------ headers / CORS

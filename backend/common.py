@@ -42,7 +42,7 @@ QUERY_PARAMS: dict[str, frozenset[str]] = {
     "get_overview": _FILTERS,
     "get_graph": _FILTERS,
     "export_alerts": _FILTERS | {"format", "limit", "sort", "order"},
-    "metrics_history": frozenset({"minutes"}),
+    "sensor_history": frozenset({"minutes"}),
     "stream": frozenset({"after_id"}),
     "admin.read_audit": frozenset({"limit", "offset", "action", "actor", "since", "target"}),
 }

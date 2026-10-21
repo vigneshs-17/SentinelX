@@ -156,6 +156,38 @@ def test_health_view_shows_online_sensor_and_sparklines(page, login_as):
     expect(page.locator("svg.spark")).to_have_count(4)
 
 
+def test_blocked_sensor_requests_show_a_visible_error_on_health_and_overview(page, login_as):
+    """An ad blocker aborts the request (net::ERR_BLOCKED_BY_CLIENT): the page must say so, not stay blank."""
+    login_as("viewer", "overview")
+    expect(page.locator("#load-error")).to_be_hidden()
+    page.route("**/api/v1/sensor/**", lambda route: route.abort("blockedbyclient"))
+    page.goto(page.url.split("#")[0] + "#/health")
+    expect(page.get_by_role("alert").filter(has_text="Could not load sensor status")).to_be_visible()
+    page.goto(page.url.split("#")[0] + "#/overview")
+    expect(page.get_by_role("alert").filter(has_text="Could not load sensor status")).to_be_visible()
+    expect(page.get_by_role("heading", name="Top sources")).to_be_visible()  # the alert overview itself still loads
+
+
+def test_server_error_on_sensor_status_is_shown_and_clears_when_it_recovers(page, login_as):
+    login_as("viewer", "health")
+    page.route(
+        "**/api/v1/sensor/status",
+        lambda route: route.fulfill(
+            status=503,
+            content_type="application/json",
+            body='{"error": "Service Unavailable", "message": "The sensor database is not available yet.", "status": 503}',
+        ),
+    )
+    page.goto(page.url.split("#")[0] + "#/overview")
+    page.goto(page.url.split("#")[0] + "#/health")
+    expect(page.get_by_role("alert").filter(has_text="Could not load sensor status")).to_contain_text("HTTP 503")
+    page.unroute("**/api/v1/sensor/status")
+    page.goto(page.url.split("#")[0] + "#/overview")
+    page.goto(page.url.split("#")[0] + "#/health")
+    expect(page.locator("#load-error")).to_be_hidden()
+    expect(page.locator("svg.spark")).to_have_count(4)
+
+
 # ------------------------------------------------------------------ filters, keyboard, graph, export
 
 

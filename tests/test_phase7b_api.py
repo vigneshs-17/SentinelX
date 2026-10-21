@@ -134,25 +134,25 @@ def beat(minutes_ago, received, dropped, pps=10.0, queue=0, state=5):
     )
 
 
-def test_metrics_history_window_points_drop_rate_and_threshold(viewer, monkeypatch):
+def test_sensor_history_window_points_drop_rate_and_threshold(viewer, monkeypatch):
     monkeypatch.setattr(api_mod, "DROP_WARN_RATIO", 0.02)
     beat(45, 0, 0)  # outside the 30 minute window
     beat(25, 1000, 0)
     beat(10, 2000, 30, pps=55.5, queue=7, state=99)
     beat(1, 3000, 60)
-    body = viewer.get("/api/v1/metrics/history").get_json()
+    body = viewer.get("/api/v1/sensor/history").get_json()
     assert body["window_minutes"] == 30 and len(body["points"]) == 3
     assert body["points"][1]["pps_10s"] == 55.5 and body["points"][1]["queue_depth"] == 7
     assert body["drop_rate"] == pytest.approx(60 / 2000) and body["drop_warn_ratio"] == 0.02
     assert [p["last_seen"] for p in body["points"]] == sorted(p["last_seen"] for p in body["points"])
-    assert len(viewer.get("/api/v1/metrics/history?minutes=60").get_json()["points"]) == 4
+    assert len(viewer.get("/api/v1/sensor/history?minutes=60").get_json()["points"]) == 4
 
 
-def test_metrics_history_empty_and_validation(viewer):
-    body = viewer.get("/api/v1/metrics/history").get_json()
+def test_sensor_history_empty_and_validation(viewer):
+    body = viewer.get("/api/v1/sensor/history").get_json()
     assert body["points"] == [] and body["drop_rate"] is None
     for bad in ("minutes=0", "minutes=181", "minutes=x", "other=1"):
-        assert viewer.get(f"/api/v1/metrics/history?{bad}").status_code == 400
+        assert viewer.get(f"/api/v1/sensor/history?{bad}").status_code == 400
 
 
 # ------------------------------------------------------------------ export

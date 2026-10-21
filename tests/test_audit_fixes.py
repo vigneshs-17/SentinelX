@@ -374,7 +374,7 @@ def test_alerts_db_failure_still_says_sensor_database(monkeypatch):
         raise sqlite3.OperationalError("unable to open database file")
 
     monkeypatch.setattr(api_mod, "get_readonly_connection", broken)
-    body = client.get("/api/v1/metrics").get_json()
+    body = client.get("/api/v1/sensor/status").get_json()
     assert "sensor database" in body["message"].lower()
 
 
@@ -445,3 +445,15 @@ def test_live_capture_callback_returns_none_so_scapy_prints_nothing_per_packet(m
     callback = seen["prn"]
     assert callback("pkt") is None
     assert pipe.enqueued == ["pkt"]
+
+
+# ------------------------------------------------------------------ endpoint rename (ad blockers block "metrics")
+
+
+def test_sensor_endpoints_exist_and_the_old_metrics_paths_are_gone():
+    client = authed_client(api_mod.app)
+    assert client.get("/api/v1/sensor/status").status_code == 200
+    assert client.get("/api/v1/sensor/history").status_code == 200
+    for old in ("/api/v1/metrics", "/api/v1/metrics/history"):
+        assert client.get(old).status_code == 404  # no alias
+    assert not [r for r in api_mod.app.url_map.iter_rules() if "metrics" in r.rule]

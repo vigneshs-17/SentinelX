@@ -61,6 +61,12 @@ the rest come from commit titles and test docstrings.
 - **N12** `.schemathesis/` ignored, unreferenced `screenshots/dashboard.png` removed, BOM removed from `LICENSE`, stale comment fixed.
 - Four unused settings removed: `SENTINELX_MAX_TRACKED_ENTRIES`, `SENTINELX_MODE`, `SENTINELX_PCAP_PATH`, `SENTINELX_API_DEBUG`.
 
+### After 2.0.0
+
+- **Scan detectors** count a destination only when its handshake did not complete (unanswered, RST-answered or half-open); ordinary browsing to many servers no longer raises `PORT_SCAN` (`detection/handshakes.py`, DESIGN section 10).
+- **Breaking API change:** `GET /api/v1/metrics` is now `GET /api/v1/sensor/status` and `GET /api/v1/metrics/history` is now `GET /api/v1/sensor/history` (no alias). Ad blockers block URLs containing "metrics", which blanked the Overview and Sensor health pages.
+- The Overview and Sensor health pages now show "Could not load sensor status ..." when a request fails, instead of staying blank.
+
 ### Known gaps at this version
 
 - The Phase 5 real-data run (CIC-IDS2017) has not been done, so ML accuracy is unmeasured and ML stays off.

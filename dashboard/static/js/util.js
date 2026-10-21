@@ -69,3 +69,12 @@ export function initTheme(button) {
     }
   });
 }
+
+/**
+ * Text for a failed request, shown to the user instead of swallowing the error. A browser extension that blocks the
+ * request makes fetch() throw a bare TypeError ("Failed to fetch"), so say that is a possible cause.
+ */
+export function loadFailure(what, err) {
+  const detail = err && err.status ? `${err.message} (HTTP ${err.status})` : "the request did not complete; a browser extension such as an ad blocker may be blocking it";
+  return `Could not load ${what}: ${detail}. Retrying automatically.`;
+}

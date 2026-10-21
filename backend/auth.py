@@ -53,7 +53,7 @@ PERMISSIONS: dict[str, frozenset[str]] = {
     "audit:read": frozenset({"admin"}),
 }
 
-# Per-process counters surfaced in /api/v1/metrics.
+# Per-process counters surfaced in /api/v1/sensor/status.
 auth_metrics: dict[str, int] = {"login_success": 0, "login_failures": 0, "login_lockouts": 0}
 
 

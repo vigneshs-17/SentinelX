@@ -174,7 +174,7 @@ def test_waitress_actually_serves_health_and_metrics():
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5) as r:  # noqa: S310
             assert r.status == 200 and json.loads(r.read())["status"] == "healthy"
         req = urllib.request.Request(
-            f"http://127.0.0.1:{port}/api/v1/metrics", headers={"Authorization": f"Bearer {key}"}
+            f"http://127.0.0.1:{port}/api/v1/sensor/status", headers={"Authorization": f"Bearer {key}"}
         )  # noqa: S310
         with urllib.request.urlopen(req, timeout=5) as r:  # noqa: S310
             assert json.loads(r.read())["sensor_online"] is False
@@ -291,22 +291,22 @@ def test_sensor_retention_prunes_alerts_and_old_heartbeats_and_zero_disables():
     conn.close()
 
 
-# ------------------------------------------------------------------ /api/v1/metrics
+# ------------------------------------------------------------------ /api/v1/sensor/status
 
 
 def test_metrics_online_offline_and_never_reported(monkeypatch):
     client = authed_client(api_mod.app)
-    body = client.get("/api/v1/metrics").get_json()
+    body = client.get("/api/v1/sensor/status").get_json()
     assert body["sensor_online"] is False and body["last_seen"] is None
 
     insert_sensor_status(status_row(NOW))
     monkeypatch.setattr(api_mod, "utcnow", lambda: NOW + timedelta(seconds=29))
-    online = client.get("/api/v1/metrics").get_json()
+    online = client.get("/api/v1/sensor/status").get_json()
     assert online["sensor_online"] is True and online["received"] == 100 and online["pps_10s"] == 12.5
     assert "id" not in online and online["age_seconds"] == 29.0
 
     monkeypatch.setattr(api_mod, "utcnow", lambda: NOW + timedelta(seconds=31))
-    assert client.get("/api/v1/metrics").get_json()["sensor_online"] is False
+    assert client.get("/api/v1/sensor/status").get_json()["sensor_online"] is False
 
 
 # ------------------------------------------------------------------ sinks
@@ -453,7 +453,7 @@ def test_webhook_url_never_appears_in_logs_repr_metrics_or_api(caplog, monkeypat
             assert wait_for(lambda: wh.failures == 1)
             sensor.write_status()
         everything = caplog.text + repr(wh) + json.dumps(sensor.collect_status())
-        everything += authed_client(api_mod.app).get("/api/v1/metrics").get_data(as_text=True)
+        everything += authed_client(api_mod.app).get("/api/v1/sensor/status").get_data(as_text=True)
         assert "SUPER-SECRET-TOKEN" not in everything and "hooks.example.com" not in everything
         assert sensor.collect_status()["webhook_failures"] == 1
     finally:

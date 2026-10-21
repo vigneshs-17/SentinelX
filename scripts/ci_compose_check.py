@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     plain = urllib.request.build_opener()
 
-    status, metrics = call(plain, args.base, "GET", "/api/v1/metrics", key=args.key)
+    status, metrics = call(plain, args.base, "GET", "/api/v1/sensor/status", key=args.key)
     if status != 200 or not metrics.get("sensor_online"):
         return fail(f"sensor not online: HTTP {status} {metrics}")
     print("[ok] sensor heartbeat online")
