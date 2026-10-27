@@ -7,7 +7,7 @@ bandit==1.9.4
 pip-audit==2.10.1
 urllib3==2.8.0
 
-schemathesis==4.32.1
+schemathesis==4.32.4
 anyio==4.15.1
 certifi==2026.10.19
 charset-normalizer==3.5.2
