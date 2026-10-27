@@ -15,7 +15,7 @@ graphql-core==3.3.0
 harfile==0.5.0
 hypothesis==6.170.5
 hypothesis-graphql==0.13.3
-idna==3.19
+idna==3.20
 jsonschema-rs==0.59.0
 markdown-it-py==4.2.0
 mdurl==0.1.2
