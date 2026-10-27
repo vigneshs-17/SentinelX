@@ -16,7 +16,7 @@ harfile==0.5.0
 hypothesis==6.170.5
 hypothesis-graphql==0.13.3
 idna==3.19
-jsonschema-rs==0.59.0
+jsonschema-rs==0.60.1
 markdown-it-py==4.2.0
 mdurl==0.1.2
 pygments==2.21.0
