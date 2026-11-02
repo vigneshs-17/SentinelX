@@ -11,7 +11,7 @@ schemathesis==4.32.4
 anyio==4.15.1
 certifi==2026.10.19
 charset-normalizer==3.5.2
-graphql-core==3.3.0
+graphql-core==3.3.1
 harfile==0.6.0
 hypothesis==6.170.5
 hypothesis-graphql==0.13.6
