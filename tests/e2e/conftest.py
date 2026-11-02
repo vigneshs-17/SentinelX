@@ -47,7 +47,11 @@ def browser_context_args():
 
 @pytest.fixture(scope="session")
 def server(tmp_path_factory):
-    s = DemoServer(tmp_path_factory.mktemp("e2e-main"), PASSWORD).start()
+    s = DemoServer(
+        tmp_path_factory.mktemp("e2e-main"),
+        PASSWORD,
+        extra_env={"SENTINELX_SENSOR_OFFLINE_AFTER": "300"},
+    ).start()
     yield s
     s.stop()
 
@@ -102,3 +106,4 @@ def axe_violations():
 
 def set_theme(page: Page, theme: str) -> None:
     page.evaluate("t => document.documentElement.setAttribute('data-theme', t)", theme)
+    page.evaluate("() => Promise.all(document.getAnimations().map(a => a.finished))")
