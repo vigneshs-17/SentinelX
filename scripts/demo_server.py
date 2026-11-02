@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import socket
 import subprocess  # nosec B404
 import sys
@@ -19,6 +20,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +30,11 @@ def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
+
+
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
 
 
 class DemoServer:
@@ -119,12 +126,34 @@ class DemoServer:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--password", required=True)
-    ap.add_argument("--port", type=int, default=5000)
+    ap.add_argument("--password", default=None, help="Password for demo users (randomly generated if omitted)")
+    ap.add_argument("--port", type=int, default=5000, help="Port to listen on (free port if 0 or busy)")
+    ap.add_argument("--pid-file", type=Path, default=None, help="Write server PID to this file")
+    ap.add_argument("--open-browser", action="store_true", help="Open default web browser once healthy")
     args = ap.parse_args()
+
+    password = args.password or secrets.token_urlsafe(16)
+    port = args.port
+    if port != 0 and is_port_in_use(port):
+        print(f"[i] Port {port} is in use; using demo_server.py free-port option...")
+        port = 0
+
     with tempfile.TemporaryDirectory(prefix="sentinelx_demo_") as tmp:
-        server = DemoServer(Path(tmp), args.password, port=args.port).start()
-        print(f"[+] demo console on {server.base_url}/  (demo-admin / demo-analyst / demo-viewer). Ctrl+C to stop.")
+        server = DemoServer(Path(tmp), password, port=port).start()
+        if args.pid_file:
+            args.pid_file.write_text(str(os.getpid()), encoding="utf-8")
+        print("\n" + "=" * 70)
+        print("  SentinelX Classroom Demo (Fabricated Data)")
+        print("=" * 70)
+        print(f"  URL:      {server.base_url}/")
+        print("  Logins:   demo-admin  (admin)")
+        print("            demo-analyst  (analyst)")
+        print("            demo-viewer  (viewer)")
+        print(f"  Password: {password}")
+        print("=" * 70)
+        print(f"[+] demo console on {server.base_url}/  (demo-admin / demo-analyst / demo-viewer). Ctrl+C to stop.", flush=True)
+        if args.open_browser:
+            webbrowser.open(f"{server.base_url}/")
         try:
             while True:
                 time.sleep(1)
@@ -132,6 +161,11 @@ def main() -> int:
             pass
         finally:
             server.stop()
+            if args.pid_file:
+                try:
+                    args.pid_file.unlink(missing_ok=True)
+                except OSError:
+                    pass
     return 0
 
 

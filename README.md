@@ -10,6 +10,14 @@ SentinelX watches TCP/UDP header metadata and raises alerts for five patterns: v
 
 It is a passive monitor on one host. It does not block traffic, inspect payloads, or scale past one CPU core on the packet path (see [Limitations](#limitations)).
 
+## Classroom demo (Windows)
+
+For teaching, hands-on labs, or quick evaluation without needing Administrator privileges, Npcap, or network access:
+
+1. Double-click `start-demo.cmd` (or run it from a terminal). It creates `.venv`, installs requirements if needed, starts the console on `127.0.0.1` with freshly seeded fabricated alerts and accounts, generates a random password, and opens your browser.
+2. Sign in as `demo-admin`, `demo-analyst`, or `demo-viewer` using the generated password shown in the terminal.
+3. When finished, double-click `stop-demo.cmd` (or press Ctrl+C in the terminal) to stop the demo server cleanly.
+
 ## 60-second quickstart
 
 ### Linux, Docker
