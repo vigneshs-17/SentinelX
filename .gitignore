@@ -60,3 +60,6 @@ terminal 1 command.txt
 
 # Schemathesis run cache
 .schemathesis/
+
+# Demo launcher PID
+.demo.pid
