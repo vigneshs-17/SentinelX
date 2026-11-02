@@ -7,16 +7,16 @@ bandit==1.9.4
 pip-audit==2.10.1
 urllib3==2.8.0
 
-schemathesis==4.32.1
+schemathesis==4.32.4
 anyio==4.15.1
 certifi==2026.10.19
 charset-normalizer==3.5.2
 graphql-core==3.3.0
-harfile==0.5.0
+harfile==0.6.0
 hypothesis==6.170.5
-hypothesis-graphql==0.13.3
-idna==3.19
-jsonschema-rs==0.59.0
+hypothesis-graphql==0.13.6
+idna==3.20
+jsonschema-rs==0.60.1
 markdown-it-py==4.2.0
 mdurl==0.1.2
 pygments==2.21.0
@@ -26,7 +26,7 @@ requests==2.34.2
 rich==15.0.0
 sortedcontainers==2.4.0
 typing-extensions==4.16.0
-playwright==1.64.0
+playwright==1.64.1
 pytest-playwright==0.10.0
 greenlet==3.5.6
 pyee==14.0.0
